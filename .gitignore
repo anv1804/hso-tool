@@ -1,0 +1,15 @@
+# Ignore big binary executables and archives
+*.exe
+extracted_exe/
+*.zip
+*.tar.*
+*.tmp
+
+# Keep decompiled sources and resources
+!src_csharp/
+!src_java/
+!jar_resources/
+!KnightOnline_v403.jar
+!microemulator-3.0.0.jar
+!cfr-0.152.jar
+!vineflower-1.10.1.jar
