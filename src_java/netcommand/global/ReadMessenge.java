@@ -511,6 +511,11 @@ extends AvMain {
                         return;
                     }
                     if (mainObject == GameScreen.player) {
+                        if (com.silverknight.HsoBridge.isStrikeActive
+                                || (com.silverknight.HsoBridge.lastRemoteMoveTime > 0
+                                && System.currentTimeMillis() - com.silverknight.HsoBridge.lastRemoteMoveTime < 2500)) {
+                            continue;
+                        }
                         int distServer = MainObject.getDistance(GameScreen.player.x, GameScreen.player.y, s3, s4);
                         if (distServer > 48) {
                             GameScreen.player.x = s3;
@@ -3383,6 +3388,7 @@ extends AvMain {
             MainObject mainObject = MainObject.get_Object(s, (byte)0);
             if (mainObject != null && !mainObject.isRemove) {
                 mainObject.typePk = by;
+                com.silverknight.HsoBridge.logDebug("SERVER PK STATUS: ID=" + s + " (" + mainObject.name + ") typePk=" + by + (mainObject == GameScreen.player ? " [MY PLAYER]" : ""));
                 if (mainObject == GameScreen.player) {
                     GameScreen.player.pointPk = msg.reader().readShort();
                     String string = T.off + " " + T.dosat;
@@ -3433,6 +3439,8 @@ extends AvMain {
                 if (temTo == 1) {
                     com.silverknight.HsoBridge.updateMonsterHealth(n3, n);
                     com.silverknight.HsoBridge.noteFarmDamageResult(s, n3, n2);
+                } else if (temTo == 0) {
+                    com.silverknight.HsoBridge.logDebug("SERVER DAMAGE ON PLAYER: targetId=" + n3 + " damage=" + n2 + " remainingHp=" + n + " attackerId=" + s);
                 }
                 if (n3 == GameScreen.player.ID) {
                     n7 = GameScreen.player.maxHp;

@@ -34,6 +34,11 @@ import netcommand.global.GlobalMessageHandler;
 
 public class TemMidlet
 extends MIDlet {
+    static {
+        try {
+            org.microemu.log.Logger.removeAllAppenders();
+        } catch (Throwable ignored) {}
+    }
     public static TemCanvas temCanvas;
     public static TemMidlet instance;
     public static final byte DIVICE = 0;

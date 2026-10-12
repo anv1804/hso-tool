@@ -16,7 +16,19 @@ import sys
 import subprocess
 import json
 import time
+import math
 from pathlib import Path
+
+# Kích hoạt DPI-Aware trên Windows để giao diện sắc nét 100%, không bị mờ nhòe do Windows DWM scale
+if sys.platform == "win32":
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
 
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -32,9 +44,30 @@ STATE_FILE = BASE_DIR / "client_state.json"
 CMD_FILE = BASE_DIR / "client_command.json"
 CMD_DIR = BASE_DIR / "client_commands"
 
-JAVA_EXEC = "/usr/lib/jvm/java-8-openjdk-amd64/jre/bin/java"
-if not os.path.exists(JAVA_EXEC):
-    JAVA_EXEC = "java"
+def resolve_jdk_tool(tool_name):
+    java_home = os.environ.get("JAVA_HOME")
+    if java_home:
+        ext = ".exe" if sys.platform == "win32" else ""
+        cand = Path(java_home) / "bin" / f"{tool_name}{ext}"
+        if cand.exists():
+            return str(cand)
+    import shutil
+    w = shutil.which(tool_name)
+    if w:
+        return w
+    return tool_name
+
+
+def resolve_java_exec():
+    linux_java = "/usr/lib/jvm/java-8-openjdk-amd64/jre/bin/java"
+    if sys.platform != "win32" and os.path.exists(linux_java):
+        return linux_java
+    return resolve_jdk_tool("java")
+
+
+JAVA_EXEC = resolve_java_exec()
+JAVAC_EXEC = resolve_jdk_tool("javac")
+JAR_EXEC = resolve_jdk_tool("jar")
 
 
 def sort_monsters_for_panel(monsters, player, focus_id, pinned_id):
@@ -49,6 +82,20 @@ def sort_monsters_for_panel(monsters, player, focus_id, pinned_id):
         return priority, distance, monster_id
 
     return sorted(monsters, key=key)
+
+
+def sort_players_for_panel(players, player, focus_id, pinned_id):
+    px, py = player.get("x", 0), player.get("y", 0)
+
+    def key(p):
+        p_id = p.get("id")
+        priority = (0 if p_id == pinned_id else
+                    1 if p_id == focus_id else
+                    2 if p.get("hp", 0) > 0 else 3)
+        distance = (p.get("x", 0) - px) ** 2 + (p.get("y", 0) - py) ** 2
+        return priority, distance, p_id
+
+    return sorted(players, key=key)
 
 
 def farm_profile_key(map_id, area):
@@ -303,9 +350,6 @@ class HsoButton(tk.Canvas):
         cx = self.w // 2 + offset
         cy = self.h // 2 + offset
 
-        # Đổ bóng chữ đen
-        shadow_fg = "#080302" if self.is_disabled else "#120502"
-        self.create_text(cx + 1, cy + 1, text=self.text, fill=shadow_fg, font=(FONT_FAMILY, self.font_size), anchor="center")
         if self.is_disabled:
             fg = "#6a4e3c"
         elif self.gold_text or self.is_selected:
@@ -424,23 +468,179 @@ class HsoPanel(tk.Frame):
             bg0 = "#381c10" if self.active_tab_idx == 0 else "#1c0b05"
             fg0 = "#ffdf79" if self.active_tab_idx == 0 else "#96806e"
             c.create_rectangle(0, 0, mid, 18, fill=bg0, outline="")
-            c.create_text(mid // 2 + 1, 10, text=self.tabs[0], fill="#120602", font=(FONT_FAMILY, 7), anchor="center")
-            c.create_text(mid // 2, 9, text=self.tabs[0], fill=fg0, font=(FONT_FAMILY, 7), anchor="center")
+            c.create_text(mid // 2, 9, text=self.tabs[0], fill=fg0, font=(FONT_FAMILY, 8), anchor="center")
 
             # Tab 1 (Bên phải: PLAYER)
             bg1 = "#381c10" if self.active_tab_idx == 1 else "#1c0b05"
             fg1 = "#ffdf79" if self.active_tab_idx == 1 else "#96806e"
             c.create_rectangle(mid, 0, w, 18, fill=bg1, outline="")
-            c.create_text(mid + (w - mid) // 2 + 1, 10, text=self.tabs[1], fill="#120602", font=(FONT_FAMILY, 7), anchor="center")
-            c.create_text(mid + (w - mid) // 2, 9, text=self.tabs[1], fill=fg1, font=(FONT_FAMILY, 7), anchor="center")
+            c.create_text(mid + (w - mid) // 2, 9, text=self.tabs[1], fill=fg1, font=(FONT_FAMILY, 8), anchor="center")
 
             # Đường chia 2 tab
             c.create_line(mid, 0, mid, 18, fill=COLOR_BORDER_GOLD)
         else:
             c.create_rectangle(0, 0, w, 18, fill="#2c160c", outline="")
             ty = 9
-            c.create_text(w // 2 + 1, ty + 1, text=self.title, fill="#120602", font=(FONT_FAMILY, 7), anchor="center")
-            c.create_text(w // 2, ty, text=self.title, fill="#ffdf79", font=(FONT_FAMILY, 7), anchor="center")
+            c.create_text(w // 2, ty, text=self.title, fill="#ffdf79", font=(FONT_FAMILY, 8), anchor="center")
+
+
+class HsoMarquee(tk.Frame):
+    """Băng thông báo chữ chạy ngang phong cách game Hiệp Sĩ Online"""
+    def __init__(self, parent, height=20, speed=2, **kwargs):
+        super().__init__(parent, bg=COLOR_BORDER_GOLD, bd=1, relief="solid")
+        self.height = height
+        self.speed = speed
+        self._text = ""
+        self._fg = COLOR_TEXT_GOLD
+        self._is_alert = False
+        self._x = 0
+        self._text_width = 0
+        self._timer = None
+        self._flash_tick = 0
+
+        self.canvas = tk.Canvas(self, height=self.height - 2, bg="#160b06", highlightthickness=0)
+        self.canvas.pack(fill="both", expand=True)
+        self._item = self.canvas.create_text(
+            0, (self.height - 2) // 2,
+            text="",
+            fill=self._fg,
+            font=(FONT_FAMILY, 8, "bold"),
+            anchor="w"
+        )
+        self.canvas.bind("<Configure>", self._on_resize)
+        self._start()
+
+    def _on_resize(self, event):
+        if self._x == 0 or self._x > event.width:
+            self._x = event.width
+
+    def set_message(self, text, fg=None, is_alert=False):
+        fg = fg or COLOR_TEXT_GOLD
+        if text != self._text or fg != self._fg or is_alert != self._is_alert:
+            old_empty = not bool(self._text)
+            self._text = text
+            self._fg = fg
+            self._is_alert = is_alert
+            self.canvas.itemconfig(self._item, text=self._text, fill=self._fg)
+            bbox = self.canvas.bbox(self._item)
+            if bbox:
+                self._text_width = bbox[2] - bbox[0]
+            else:
+                self._text_width = len(text) * 7
+            w = self.canvas.winfo_width()
+            if w > 10 and (old_empty or self._x > w):
+                self._x = w
+
+    def _start(self):
+        self._tick()
+
+    def _tick(self):
+        try:
+            if not self.winfo_exists():
+                return
+            w = self.canvas.winfo_width()
+            if w > 10 and self._text:
+                self._x -= self.speed
+                if self._x + self._text_width < 0:
+                    self._x = w + 10
+                y = (self.height - 2) // 2
+                self.canvas.coords(self._item, self._x, y)
+
+                if self._is_alert:
+                    self._flash_tick = (self._flash_tick + 1) % 16
+                    if self._flash_tick < 8:
+                        self.canvas.itemconfig(self._item, fill="#ff3b30")
+                        self.configure(bg="#ff3b30")
+                    else:
+                        self.canvas.itemconfig(self._item, fill="#ffd60a")
+                        self.configure(bg=COLOR_BORDER_GOLD)
+                else:
+                    self.canvas.itemconfig(self._item, fill=self._fg)
+                    self.configure(bg=COLOR_BORDER_GOLD)
+            self._timer = self.after(50, self._tick)
+        except Exception:
+            pass
+
+    def destroy(self):
+        if self._timer:
+            try:
+                self.after_cancel(self._timer)
+            except Exception:
+                pass
+            self._timer = None
+        super().destroy()
+
+
+class HsoConfirmModal:
+    """Modal xác nhận hành động nguy hiểm/nhạy cảm (Bảo vệ tài khoản tránh bị tố cáo/ban nick)"""
+    def __init__(self, parent, title, message, on_confirm, on_cancel=None, renderer=None):
+        self.dlg = tk.Toplevel(parent)
+        self.dlg.title(title)
+        self.dlg.configure(bg=COLOR_BG_DARK)
+        self.dlg.resizable(False, False)
+        self.dlg.transient(parent)
+        self.dlg.grab_set()
+
+        w, h = 380, 210
+        px = parent.winfo_rootx() + max(0, (parent.winfo_width() - w) // 2)
+        py = parent.winfo_rooty() + max(0, (parent.winfo_height() - h) // 2)
+        self.dlg.geometry(f"{w}x{h}+{px}+{py}")
+
+        panel = HsoPanel(self.dlg, title=title)
+        panel.pack(fill="both", expand=True, padx=4, pady=4)
+        body = panel.body
+
+        msg_frame = tk.Frame(body, bg="#1e1109")
+        msg_frame.pack(fill="both", expand=True, padx=8, pady=(8, 4))
+
+        lbl = tk.Label(
+            msg_frame,
+            text=message,
+            font=(FONT_FAMILY, 8),
+            fg="#ffdf79",
+            bg="#1e1109",
+            justify="left",
+            wraplength=340
+        )
+        lbl.pack(fill="both", expand=True)
+
+        btn_row = tk.Frame(body, bg="#1e1109")
+        btn_row.pack(side="bottom", fill="x", pady=(4, 4), padx=6)
+
+        def _do_confirm():
+            self.dlg.destroy()
+            if on_confirm:
+                on_confirm()
+
+        def _do_cancel():
+            self.dlg.destroy()
+            if on_cancel:
+                on_cancel()
+
+        # Nút Hủy bỏ (Mặc định - An toàn)
+        HsoButton(
+            btn_row,
+            text="HỦY BỎ (AN TOÀN)",
+            font_size=8,
+            width=140,
+            height=24,
+            renderer=renderer,
+            command=_do_cancel
+        ).pack(side="left")
+
+        # Nút Xác nhận (Mạo hiểm)
+        HsoButton(
+            btn_row,
+            text="XÁC NHẬN BẬT",
+            font_size=8,
+            width=110,
+            height=24,
+            gold_text=True,
+            renderer=renderer,
+            command=_do_confirm
+        ).pack(side="right")
+
+        self.dlg.protocol("WM_DELETE_WINDOW", _do_cancel)
 
 
 class HsoStudioApp:
@@ -448,9 +648,9 @@ class HsoStudioApp:
         self.root = root
         self.root.title("Knight Online - HSO Tool")
 
-        # Kích thước siêu gọn nhẹ
-        self.root.geometry("560x365")
-        self.root.minsize(520, 330)
+        # Kích thước chuẩn nét cao (High-DPI)
+        self.root.geometry("680x470")
+        self.root.minsize(560, 410)
         self.root.configure(bg=COLOR_BG_DARK)
 
         self.config = load_config()
@@ -469,7 +669,9 @@ class HsoStudioApp:
 
         # Xây dựng các khu vực
         self.build_top_bar()
+        self.build_marquee_top()
         self.build_bottom_bar()
+        self.build_marquee_bottom()
         self.mid_area = tk.Frame(self.root, bg=COLOR_BG_DARK)
         self.mid_area.pack(fill="both", expand=True, padx=3, pady=3)
         self.build_left_sidebar()
@@ -479,6 +681,13 @@ class HsoStudioApp:
 
         # Vòng lặp cập nhật IPC
         self.poll_ipc_loop()
+
+        # Dọn dẹp tiến trình khi đóng app
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def on_close(self):
+        self.stop_game()
+        self.root.destroy()
 
     def load_assets(self):
         try:
@@ -527,7 +736,7 @@ class HsoStudioApp:
         tk.Label(
             brand_box,
             text="Anv TOOL",
-            font=(FONT_FAMILY, 8),
+            font=(FONT_FAMILY, 9, "bold"),
             fg=COLOR_TEXT_GOLD,
             bg=COLOR_PANEL_BG
         ).pack(anchor="w")
@@ -535,7 +744,7 @@ class HsoStudioApp:
         tk.Label(
             brand_box,
             text="HSO Assistant & Automation",
-            font=(FONT_FAMILY, 6),
+            font=(FONT_FAMILY, 7),
             fg=COLOR_TEXT_MUTED,
             bg=COLOR_PANEL_BG
         ).pack(anchor="w")
@@ -553,7 +762,7 @@ class HsoStudioApp:
         self.lbl_client_status = tk.Label(
             status_box,
             text="OFFLINE",
-            font=(FONT_FAMILY, 7),
+            font=(FONT_FAMILY, 8, "bold"),
             fg=COLOR_OFFLINE,
             bg=COLOR_PANEL_BG
         )
@@ -566,7 +775,12 @@ class HsoStudioApp:
             fg=COLOR_TEXT_MUTED,
             bg=COLOR_PANEL_BG
         )
-        self.lbl_in_game_status.pack(anchor="e", pady=(3, 0))
+        self.lbl_in_game_status.pack(anchor="e", pady=(2, 0))
+
+    def build_marquee_top(self):
+        self.marquee_top = HsoMarquee(self.root, height=20, speed=2)
+        self.marquee_top.pack(fill="x", padx=3, pady=(2, 0))
+        self.marquee_top.set_message("⚡ KNIGHT ONLINE - HSO TOOL • CHỜ KẾT NỐI VÀO GAME • SẴN SÀNG HỖ TRỢ ⚡", fg=COLOR_TEXT_MUTED)
 
     # ==============================================================
     # 2. BOTTOM BAR (TỐI ƯU GỌN GÀNG)
@@ -585,9 +799,9 @@ class HsoStudioApp:
         self.btn_fps = HsoButton(
             b_content,
             text="60 FPS: ON" if self.config.get("fps_60", True) else "60 FPS: OFF",
-            font_size=7,
-            width=76,
-            height=20,
+            font_size=8,
+            width=82,
+            height=23,
             gold_text=True,
             renderer=self.btn_renderer,
             command=self.toggle_fps
@@ -598,10 +812,10 @@ class HsoStudioApp:
         tk.Label(
             b_content,
             text="Java 8 • J2ME",
-            font=(FONT_FAMILY, 7),
+            font=(FONT_FAMILY, 8),
             fg=COLOR_TEXT_MUTED,
             bg=COLOR_PANEL_BG
-        ).pack(side="left", padx=(6, 0))
+        ).pack(side="left", padx=(8, 0))
 
         # Nút Play / Stop Game gộp làm 1, đặt ở góc phải
         is_running = bool(self.game_proc and self.game_proc.poll() is None)
@@ -609,19 +823,24 @@ class HsoStudioApp:
             b_content,
             text="Stop Game" if is_running else "Play Game",
             font_size=8,
-            width=85,
-            height=20,
+            width=92,
+            height=23,
             gold_text=True,
             renderer=self.btn_renderer,
             command=self.toggle_game
         )
         self.btn_game_toggle.pack(side="right")
 
+    def build_marquee_bottom(self):
+        self.marquee_bottom = HsoMarquee(self.root, height=20, speed=2)
+        self.marquee_bottom.pack(fill="x", side="bottom", padx=3, pady=(0, 2))
+        self.marquee_bottom.set_message("⚡ HỆ THỐNG AN TOÀN ĐANG TRỰC CHIẾN • TỰ ĐỘNG PHÁT HIỆN BOT & NGƯỜI LẠ ⚡", fg=COLOR_TEXT_MUTED)
+
     # ==============================================================
     # 3. LEFT SIDEBAR (LOCATION & MONSTERS/PLAYERS)
     # ==============================================================
     def build_left_sidebar(self):
-        left_container = tk.Frame(self.mid_area, bg=COLOR_BG_DARK, width=148)
+        left_container = tk.Frame(self.mid_area, bg=COLOR_BG_DARK, width=160)
         left_container.pack(side="left", fill="y", padx=(0, 3))
         left_container.pack_propagate(False)
 
@@ -632,27 +851,27 @@ class HsoStudioApp:
 
         r_m1 = tk.Frame(c_map, bg="#1e1109")
         r_m1.pack(fill="x", pady=(0, 3))
-        tk.Label(r_m1, text="Map:", font=(FONT_FAMILY, 7), fg=COLOR_TEXT_MUTED, bg="#1e1109").pack(side="left")
-        self.lbl_map_name = tk.Label(r_m1, text="Connecting...", font=(FONT_FAMILY, 7), fg=COLOR_TEXT_GOLD, bg="#1e1109")
+        tk.Label(r_m1, text="Map:", font=(FONT_FAMILY, 8), fg=COLOR_TEXT_MUTED, bg="#1e1109").pack(side="left")
+        self.lbl_map_name = tk.Label(r_m1, text="Connecting...", font=(FONT_FAMILY, 8), fg=COLOR_TEXT_GOLD, bg="#1e1109")
         self.lbl_map_name.pack(side="left", padx=(3, 0))
 
         r_m2 = tk.Frame(c_map, bg="#1e1109")
         r_m2.pack(fill="x", pady=(0, 3))
-        self.lbl_zone_val = tk.Label(r_m2, text="Zone: --", font=(FONT_FAMILY, 7), fg=COLOR_TEXT_WHITE, bg="#1e1109")
+        self.lbl_zone_val = tk.Label(r_m2, text="Zone: --", font=(FONT_FAMILY, 8), fg=COLOR_TEXT_WHITE, bg="#1e1109")
         self.lbl_zone_val.pack(side="left")
 
         cz_row = tk.Frame(c_map, bg="#1e1109")
         cz_row.pack(fill="x", pady=0)
 
-        tk.Label(cz_row, text="Change:", font=(FONT_FAMILY, 7), fg=COLOR_TEXT_MUTED, bg="#1e1109").pack(side="left")
+        tk.Label(cz_row, text="Change:", font=(FONT_FAMILY, 8), fg=COLOR_TEXT_MUTED, bg="#1e1109").pack(side="left")
 
         # Nút số khu hiện tại: bấm vào mở modal chọn khu
         self.btn_zone_select = HsoButton(
             cz_row,
             text="1",
-            font_size=7,
-            width=36,
-            height=20,
+            font_size=8,
+            width=38,
+            height=23,
             gold_text=True,
             renderer=self.btn_renderer,
             command=self.open_zone_modal
@@ -662,9 +881,9 @@ class HsoStudioApp:
         btn_v_vang = HsoButton(
             cz_row,
             text="Lowest",
-            font_size=7,
-            width=54,
-            height=20,
+            font_size=8,
+            width=58,
+            height=23,
             gold_text=True,
             renderer=self.btn_renderer,
             command=self.send_auto_min_area
@@ -800,20 +1019,50 @@ class HsoStudioApp:
     def toggle_auto_attack(self):
         cur = self.config.get("auto_attack", False)
         new_val = not cur
+
         if new_val:
+            data = self.state_data
+            map_id = data.get("map_id", 0)
+            area = data.get("area", 0)
+            other_count = data.get("other_players_count", len(data.get("players", [])))
+
+            # Nếu có người chơi khác (> 0 người) trong khu
+            if other_count > 0:
+                players = data.get("players", [])
+                p_names = ", ".join([p.get("name", "Người lạ") for p in players[:3]])
+                msg = (
+                    f"CẢNH BÁO AN TOÀN!\n\n"
+                    f"Khu vực hiện đang có {other_count} người chơi khác ({p_names}).\n"
+                    f"Bật Auto khi có người trong khu vực có nguy cơ bị người khác quan sát / quay clip tố cáo khóa nick!\n\n"
+                    f"Bạn có chắc chắn muốn mạo hiểm bật Auto Attack không?"
+                )
+                HsoConfirmModal(
+                    self.root,
+                    title="CẢNH BÁO: CÓ NGƯỜI TRONG KHU",
+                    message=msg,
+                    on_confirm=lambda: self._execute_toggle_auto_attack(True),
+                    on_cancel=None,
+                    renderer=self.btn_renderer
+                )
+                return
+
+        self._execute_toggle_auto_attack(new_val)
+
+    def _execute_toggle_auto_attack(self, enabled):
+        if enabled:
             self.sync_farm_targets(force=True)
-        self.config["auto_attack"] = new_val
+        self.config["auto_attack"] = enabled
         save_config(self.config)
 
-        self.btn_auto_attack.set_selected(new_val)
-        self.btn_auto_attack.configure(gold_text=new_val)
-        self.btn_auto_attack.set_text(f"Auto Attack: {'ON' if new_val else 'OFF'}")
+        self.btn_auto_attack.set_selected(enabled)
+        self.btn_auto_attack.configure(gold_text=enabled)
+        self.btn_auto_attack.set_text(f"Auto Attack: {'ON' if enabled else 'OFF'}")
 
         try:
-            self.write_command({"action": "auto_attack", "enabled": new_val})
+            self.write_command({"action": "auto_attack", "enabled": enabled})
         except OSError as e:
             self.log_msg("Không gửi được lệnh Auto Attack: " + str(e))
-        self.log_msg(f"Auto Attack: {'ON' if new_val else 'OFF'}")
+        self.log_msg(f"Auto Attack: {'ON' if enabled else 'OFF'}")
 
     def decrease_speed(self):
         cur = str(self.config.get("speed", "1.0"))
@@ -884,7 +1133,7 @@ class HsoStudioApp:
     # 4. RIGHT SIDEBAR (PLAYER INFO & CONTROLS)
     # ==============================================================
     def build_right_sidebar(self):
-        right_container = tk.Frame(self.mid_area, bg=COLOR_BG_DARK, width=148)
+        right_container = tk.Frame(self.mid_area, bg=COLOR_BG_DARK, width=160)
         right_container.pack(side="right", fill="y", padx=(3, 0))
         right_container.pack_propagate(False)
 
@@ -894,7 +1143,7 @@ class HsoStudioApp:
         c_char = self.p_char.body
 
         # Canvas vẽ 3 thanh HP, MP, EXP
-        self.canvas_player_bars = tk.Canvas(c_char, bg="#1e1109", height=42, highlightthickness=0)
+        self.canvas_player_bars = tk.Canvas(c_char, bg="#1e1109", height=48, highlightthickness=0)
         self.canvas_player_bars.pack(fill="x", expand=True)
         self.canvas_player_bars.bind("<Configure>", lambda e: self.redraw_player_bars())
 
@@ -908,9 +1157,9 @@ class HsoStudioApp:
         self.btn_screen = HsoButton(
             c_func,
             text=f"Display: {cur_w}x{cur_h}",
-            font_size=7,
+            font_size=8,
             width=96,
-            height=20,
+            height=23,
             renderer=self.btn_renderer,
             command=self.open_res_dialog
         )
@@ -920,9 +1169,9 @@ class HsoStudioApp:
         self.btn_auto_attack = HsoButton(
             c_func,
             text=f"Auto Attack: {'ON' if is_attack else 'OFF'}",
-            font_size=7,
+            font_size=8,
             width=96,
-            height=20,
+            height=23,
             is_selected=is_attack,
             gold_text=is_attack,
             renderer=self.btn_renderer,
@@ -931,19 +1180,34 @@ class HsoStudioApp:
         self.btn_auto_attack.pack(fill="x", pady=(0, 3))
 
         self.btn_auto_farm = HsoButton(
-            c_func, text="Auto Fam: Cấu hình", font_size=7,
-            width=96, height=20, renderer=self.btn_renderer,
+            c_func, text="Auto Fam: Cấu hình", font_size=8,
+            width=96, height=23, renderer=self.btn_renderer,
             command=self.open_auto_farm_modal
         )
         self.btn_auto_farm.pack(fill="x", pady=(0, 3))
 
         self.btn_unpin = HsoButton(
-            c_func, text="Bỏ ghim mục tiêu", font_size=7,
-            width=96, height=20, renderer=self.btn_renderer,
-            command=self.unpin_monster
+            c_func, text="Bỏ ghim mục tiêu", font_size=8,
+            width=96, height=23, renderer=self.btn_renderer,
+            command=self.unpin_target
         )
         self.btn_unpin.pack(fill="x", pady=(0, 3))
         self.btn_unpin.set_disabled(True)
+
+        self.btn_attack = HsoButton(
+            c_func, text="⚔️ Tấn công ngay", font_size=8,
+            width=96, height=23, renderer=self.btn_renderer,
+            command=self.attack_pinned_target
+        )
+        self.btn_attack.pack(fill="x", pady=(0, 3))
+        self.btn_attack.set_disabled(True)
+
+        self.btn_pk = HsoButton(
+            c_func, text="Đồ Sát: TẮT", font_size=8,
+            width=96, height=23, renderer=self.btn_renderer,
+            command=self.toggle_pk
+        )
+        self.btn_pk.pack(fill="x", pady=(0, 3))
 
         # Row Speed: [-] [Speed: 1.0x] [+]
         row_speed = tk.Frame(c_func, bg="#1e1109")
@@ -956,9 +1220,9 @@ class HsoStudioApp:
         self.btn_speed_down = HsoButton(
             row_speed,
             text="-",
-            font_size=8,
-            width=22,
-            height=20,
+            font_size=9,
+            width=24,
+            height=23,
             renderer=self.btn_renderer,
             command=self.decrease_speed
         )
@@ -967,9 +1231,9 @@ class HsoStudioApp:
         self.btn_speed_up = HsoButton(
             row_speed,
             text="+",
-            font_size=8,
-            width=22,
-            height=20,
+            font_size=9,
+            width=24,
+            height=23,
             renderer=self.btn_renderer,
             command=self.increase_speed
         )
@@ -978,8 +1242,8 @@ class HsoStudioApp:
         self.btn_speed_disp = HsoButton(
             row_speed,
             text=f"Speed: {cur_spd}x",
-            font_size=7,
-            height=20,
+            font_size=8,
+            height=23,
             renderer=self.btn_renderer,
             gold_text=(cur_spd != "1.0"),
             command=None
@@ -992,9 +1256,9 @@ class HsoStudioApp:
         self.btn_auto_pickup = HsoButton(
             c_func,
             text=f"Auto Loot: {'ON' if is_pickup else 'OFF'}",
-            font_size=7,
+            font_size=8,
             width=96,
-            height=20,
+            height=23,
             is_selected=is_pickup,
             gold_text=is_pickup,
             renderer=self.btn_renderer,
@@ -1007,7 +1271,7 @@ class HsoStudioApp:
         c.delete("all")
         w = c.winfo_width()
         if w < 10:
-            w = 136
+            w = 148
 
         p = self.state_data.get("player", {})
         hp = max(0, p.get("hp", 0))
@@ -1022,71 +1286,159 @@ class HsoStudioApp:
         exp_pct = min(1.0, max(0.0, float(exp_val) / 1000.0))
         exp_str = f"EXP: {exp_val / 10.0:.1f}%"
 
-        bh = 10
+        bh = 12
         pad_x = 2
         mid_x = w // 2
 
         # 1. HP BAR (Red)
-        y1 = 1
+        y1 = 2
         c.create_rectangle(pad_x, y1, w - pad_x, y1 + bh, fill="#1c0b05", outline="#5a1a15")
         fill_hp = int((w - 2 * pad_x - 2) * hp_pct)
         if fill_hp > 0:
             c.create_rectangle(pad_x + 1, y1 + 1, pad_x + 1 + fill_hp, y1 + bh - 1, fill=COLOR_HP_RED, outline="")
             c.create_rectangle(pad_x + 1, y1 + 1, pad_x + 1 + fill_hp, y1 + 2, fill="#ff7a7a", outline="")
         hp_str = f"HP: {hp}/{max_hp}"
-        c.create_text(mid_x + 1, y1 + bh // 2 + 1, text=hp_str, fill="#000000", font=(FONT_FAMILY, 6), anchor="center")
-        c.create_text(mid_x, y1 + bh // 2, text=hp_str, fill="#ffffff", font=(FONT_FAMILY, 6), anchor="center")
+        c.create_text(mid_x, y1 + bh // 2, text=hp_str, fill="#ffffff", font=(FONT_FAMILY, 7), anchor="center")
 
         # 2. MP BAR (Blue)
-        y2 = 15
+        y2 = 17
         c.create_rectangle(pad_x, y2, w - pad_x, y2 + bh, fill="#0b101c", outline="#15305a")
         fill_mp = int((w - 2 * pad_x - 2) * mp_pct)
         if fill_mp > 0:
             c.create_rectangle(pad_x + 1, y2 + 1, pad_x + 1 + fill_mp, y2 + bh - 1, fill=COLOR_MP_BLUE, outline="")
             c.create_rectangle(pad_x + 1, y2 + 1, pad_x + 1 + fill_mp, y2 + 2, fill="#7fb3d5", outline="")
         mp_str = f"MP: {mp}/{max_mp}"
-        c.create_text(mid_x + 1, y2 + bh // 2 + 1, text=mp_str, fill="#000000", font=(FONT_FAMILY, 6), anchor="center")
-        c.create_text(mid_x, y2 + bh // 2, text=mp_str, fill="#ffffff", font=(FONT_FAMILY, 6), anchor="center")
+        c.create_text(mid_x, y2 + bh // 2, text=mp_str, fill="#ffffff", font=(FONT_FAMILY, 7), anchor="center")
 
         # 3. EXP BAR (Green - Xanh lá)
-        y3 = 29
+        y3 = 32
         c.create_rectangle(pad_x, y3, w - pad_x, y3 + bh, fill="#0b1c0e", outline="#145a32")
         fill_exp = int((w - 2 * pad_x - 2) * exp_pct)
         if fill_exp > 0:
             c.create_rectangle(pad_x + 1, y3 + 1, pad_x + 1 + fill_exp, y3 + bh - 1, fill="#27ae60", outline="")
             c.create_rectangle(pad_x + 1, y3 + 1, pad_x + 1 + fill_exp, y3 + 2, fill="#58d68d", outline="")
-        c.create_text(mid_x + 1, y3 + bh // 2 + 1, text=exp_str, fill="#000000", font=(FONT_FAMILY, 6), anchor="center")
-        c.create_text(mid_x, y3 + bh // 2, text=exp_str, fill="#ffffff", font=(FONT_FAMILY, 6), anchor="center")
+        c.create_text(mid_x, y3 + bh // 2, text=exp_str, fill="#ffffff", font=(FONT_FAMILY, 7), anchor="center")
 
     def on_mon_tab_change(self, idx):
         self.active_mon_tab = idx
         self.refresh_mon_panel()
 
     def pin_monster_from_panel(self, event):
-        if self.active_mon_tab != 0 or not self.state_data.get("in_game"):
+        if not self.state_data.get("in_game"):
             return
         y = self.canvas_mon.canvasy(event.y)
-        for top, bottom, monster_id in self.monster_rows:
-            if top <= y < bottom:
-                if monster_id == self.state_data.get("pinned_monster_id", -1):
-                    self.unpin_monster()
-                    return
-                try:
-                    self.write_command({
-                        "action": "pin_monster", "id": monster_id,
-                        "map_id": self.state_data["map_id"], "area": self.state_data["area"]
-                    })
-                    self.log_msg(f"Đang ghim quái ID {monster_id}...")
-                except (OSError, KeyError) as e:
-                    self.log_msg("Không ghim được quái: " + str(e))
-                return
+        x = event.x
+        cw = self.canvas_mon.winfo_width()
+        if cw < 30:
+            cw = 136
 
-    def unpin_monster(self):
+        if self.active_mon_tab == 0:
+            for top, bottom, monster_id in getattr(self, "monster_rows", []):
+                if top <= y < bottom:
+                    if monster_id == self.state_data.get("pinned_monster_id", -1):
+                        self.unpin_target()
+                        return
+                    try:
+                        self.write_command({
+                            "action": "pin_monster", "id": monster_id,
+                            "map_id": self.state_data.get("map_id", 0),
+                            "area": self.state_data.get("area", 0)
+                        })
+                        self.log_msg(f"Đang ghim quái ID {monster_id}...")
+                    except (OSError, KeyError) as e:
+                        self.log_msg("Không ghim được quái: " + str(e))
+                    return
+        else:
+            for top, bottom, p_id, p_name in getattr(self, "player_rows", []):
+                if top <= y < bottom:
+                    if p_id == self.state_data.get("pinned_player_id", -1):
+                        self.unpin_target()
+                        return
+                    self.pin_player(p_id, p_name)
+                    return
+
+    def pin_player(self, player_id, player_name=""):
         try:
-            self.write_command({"action": "unpin_monster"})
+            self.write_command({
+                "action": "pin_player", "id": player_id,
+                "map_id": self.state_data.get("map_id", 0),
+                "area": self.state_data.get("area", 0)
+            })
+            name_str = f" ({player_name})" if player_name else ""
+            self.log_msg(f"📌 Đã ghim người chơi ID {player_id}{name_str}!")
+        except (OSError, KeyError) as e:
+            self.log_msg("Không ghim được người chơi: " + str(e))
+
+    def attack_pinned_target(self):
+        pinned_pl = self.state_data.get("pinned_player_id", -1)
+        pinned_mon = self.state_data.get("pinned_monster_id", -1)
+        if pinned_pl != -1:
+            try:
+                self.write_command({"action": "attack_player", "id": pinned_pl})
+                self.log_msg(f"⚔️ Đang tấn công người chơi ID {pinned_pl}...")
+            except OSError as e:
+                self.log_msg("Lỗi gửi lệnh tấn công: " + str(e))
+        elif pinned_mon >= 0:
+            try:
+                self.write_command({"action": "attack_monster", "id": pinned_mon})
+                self.log_msg(f"⚔️ Đang tấn công quái ID {pinned_mon}...")
+            except OSError as e:
+                self.log_msg("Lỗi gửi lệnh tấn công: " + str(e))
+        else:
+            self.log_msg("Chưa ghim mục tiêu nào để tấn công!")
+
+    def unpin_target(self):
+        try:
+            self.write_command({"action": "unpin_target"})
             self.log_msg("Đang bỏ ghim mục tiêu...")
         except OSError as e:
             self.log_msg("Không bỏ ghim được: " + str(e))
+
+    def unpin_monster(self):
+        self.unpin_target()
+
+    def toggle_pk(self):
+        try:
+            my_pk = self.state_data.get("player", {}).get("typePk", -1)
+            new_pk = -1 if my_pk == 0 else 0
+            self.write_command({"action": "set_pk", "type_pk": new_pk})
+            if new_pk == 0:
+                self.log_msg("⚔️ Đang bật chế độ ĐỒ SÁT...")
+            else:
+                self.log_msg("🕊️ Đang tắt Đồ Sát, chuyển về Hòa Bình...")
+        except (OSError, KeyError) as e:
+            self.log_msg("Không gửi lệnh đổi PK được: " + str(e))
+
+    def attack_player(self, player_id, player_name=""):
+        try:
+            self.write_command({
+                "action": "attack_player", "id": player_id
+            })
+            name_str = f" {player_name}" if player_name else ""
+            self.log_msg(f"⚔️ PK từ xa: Đang tấn công người chơi{name_str} (ID {player_id})...")
+        except (OSError, KeyError) as e:
+            self.log_msg("Không gửi lệnh tấn công được: " + str(e))
+
+    def attack_current_target(self):
+        if not self.state_data.get("in_game"):
+            self.log_msg("Chưa vào game.")
+            return
+        pinned_pl = self.state_data.get("pinned_player_id", -1)
+        if pinned_pl != -1:
+            self.attack_player(pinned_pl)
+            return
+        focus_id = self.state_data.get("focus_target_id", -1)
+        if focus_id != -1:
+            self.attack_player(focus_id)
+            return
+        players = self.state_data.get("players", [])
+        if players:
+            me = self.state_data.get("player", {})
+            mx, my = me.get("x", 0), me.get("y", 0)
+            closest = min(players, key=lambda p: (p.get("x", 0) - mx)**2 + (p.get("y", 0) - my)**2)
+            self.attack_player(closest.get("id", 0), closest.get("name", ""))
+            return
+        self.log_msg("Không có người chơi nào trong khu để tấn công.")
 
     def sync_farm_targets(self, data=None, force=False):
         data = data or self.state_data
@@ -1095,6 +1447,9 @@ class HsoStudioApp:
             return
         map_id, area = data.get("map_id", 0), data.get("area", 0)
         profile = self.config.get("auto_farm", {}).get(farm_profile_key(map_id, area))
+        other_count = data.get("other_players_count", len(data.get("players", [])))
+        if other_count > 0:
+            profile = None
         ids = resolve_farm_ids(profile, data.get("map_monsters", data.get("monsters", [])),
                                include_dead=True)
         if hasattr(self, "btn_auto_farm"):
@@ -1361,6 +1716,30 @@ class HsoStudioApp:
                 return
             chosen = {monster_id for monster_id, var in monster_vars.items() if var.get()}
             new_profile = farm_profile_from_selection(list(monsters_by_id.values()), chosen)
+
+            other_count = self.state_data.get("other_players_count", len(self.state_data.get("players", [])))
+            if len(chosen) > 0 and other_count > 0:
+                players = self.state_data.get("players", [])
+                p_names = ", ".join([p.get("name", "Người lạ") for p in players[:3]])
+                msg = (
+                    f"CẢNH BÁO AN TOÀN!\n\n"
+                    f"Khu vực hiện đang có {other_count} người chơi khác ({p_names}).\n"
+                    f"Kích hoạt gom {len(chosen)} quái 1-hit lúc này có thể bị người khác thấy quái chết hàng loạt và quay clip tố cáo!\n\n"
+                    f"Bạn có chắc chắn muốn mạo hiểm kích hoạt Auto Fam không?"
+                )
+                HsoConfirmModal(
+                    dlg,
+                    title="CẢNH BÁO BẬT AUTO FAM",
+                    message=msg,
+                    on_confirm=lambda: do_save(new_profile, chosen),
+                    on_cancel=None,
+                    renderer=self.btn_renderer
+                )
+                return
+
+            do_save(new_profile, chosen)
+
+        def do_save(new_profile, chosen):
             farm_profiles = self.config.setdefault("auto_farm", {})
             previous_profile = farm_profiles.get(profile_key)
             farm_profiles[profile_key] = new_profile
@@ -1396,6 +1775,7 @@ class HsoStudioApp:
     def render_players_list(self, players):
         c = self.canvas_mon
         c.delete("all")
+        self.player_rows = []
 
         cw = c.winfo_width()
         if cw < 30:
@@ -1404,7 +1784,7 @@ class HsoStudioApp:
         if not players:
             c.create_text(
                 cw // 2, 30,
-                text="No other players",
+                text="Không có người chơi khác",
                 fill=COLOR_TEXT_MUTED,
                 font=(FONT_FAMILY, 7),
                 justify="center",
@@ -1413,29 +1793,98 @@ class HsoStudioApp:
             c.configure(scrollregion=(0, 0, cw, 60))
             return
 
-        item_h = 13
+        item_h = 24
         pad_y = 3
         y_offset = 1
 
-        for pl in players:
-            p_name = pl.get("name", "Player")
-            p_lv = pl.get("lv", "--")
-            mid_y = y_offset + item_h // 2
+        focus_id = self.state_data.get("focus_target_id", -1)
+        pinned_id = self.state_data.get("pinned_player_id", -1)
+        me = self.state_data.get("player", {})
+        mx, my = me.get("x", 0), me.get("y", 0)
+        players = sort_players_for_panel(players, me, focus_id, pinned_id)
 
+        for pl in players:
+            p_id = pl.get("id", 0)
+            p_name = pl.get("name") or f"P_{p_id}"
+            p_lv = pl.get("lv", 0)
+            hp = max(0, pl.get("hp", 0))
+            max_hp = max(1, pl.get("maxHp", 1))
+            pct = min(1.0, max(0.0, float(hp) / float(max_hp)))
+            px, py = pl.get("x", 0), pl.get("y", 0)
+            dist = int(math.hypot(px - mx, py - my))
+
+            is_pinned = (p_id == pinned_id)
+            is_focused = (p_id == focus_id)
+
+            # Nền hàng
+            if is_pinned:
+                c.create_rectangle(
+                    0, y_offset, cw, y_offset + item_h + pad_y,
+                    fill="#7a2a0a", outline="#ffd700", width=2
+                )
+            elif is_focused:
+                c.create_rectangle(
+                    0, y_offset, cw, y_offset + item_h + pad_y,
+                    fill="#382318", outline="#c8963e", width=1
+                )
+            else:
+                c.create_rectangle(
+                    0, y_offset, cw, y_offset + item_h + pad_y,
+                    fill="#180e07", outline=""
+                )
+
+            # Con trỏ ghim / focus
+            if is_pinned or is_focused:
+                c.create_polygon(
+                    3, y_offset + 3, 3, y_offset + 11, 9, y_offset + 7,
+                    fill="#ffd700" if is_pinned else "#59d8ff",
+                    outline="#1b1008"
+                )
+
+            # Dòng 1: Tên người chơi
+            text_x = 12 if (is_pinned or is_focused) else 4
+            name_color = "#ffffff" if is_pinned else ("#9ee9ff" if is_focused else COLOR_ONLINE)
+            pl_pk = pl.get("typePk", -1)
+            pk_badge = " [PK]" if pl_pk == 0 else (" [Cờ]" if pl_pk > 0 else "")
+            pin_badge = "📌 " if is_pinned else ""
             c.create_text(
-                3, mid_y,
-                text=p_name,
-                fill=COLOR_ONLINE,
-                font=(FONT_FAMILY, 7),
+                text_x, y_offset + 7,
+                text=pin_badge + p_name[:9] + pk_badge,
+                fill="#ffffff" if is_pinned else ("#ff5555" if pl_pk == 0 else name_color),
+                font=(FONT_FAMILY, 8, "bold"),
                 anchor="w"
             )
+
+            # Lv / Dist
+            lv_txt = f"Lv.{p_lv}" if p_lv > 0 else f"{dist}p"
             c.create_text(
-                cw - 3, mid_y,
-                text=f"Lv. {p_lv}" if p_lv != "--" else "",
+                cw - 4, y_offset + 7,
+                text=lv_txt,
                 fill=COLOR_TEXT_GOLD,
                 font=(FONT_FAMILY, 7),
                 anchor="e"
             )
+
+            # Dòng 2: Thanh máu đỏ mini
+            bar_x1 = 4
+            bar_x2 = cw - 4
+            bar_w = bar_x2 - bar_x1
+            bar_y1 = y_offset + 14
+            bar_y2 = y_offset + 22
+
+            c.create_rectangle(bar_x1, bar_y1, bar_x2, bar_y2, fill="#1c0b05", outline="#5a3118")
+            fill_w = int((bar_w - 2) * pct)
+            if fill_w > 0:
+                c.create_rectangle(bar_x1 + 1, bar_y1 + 1, bar_x1 + 1 + fill_w, bar_y2 - 1, fill=COLOR_HP_RED, outline="")
+                c.create_rectangle(bar_x1 + 1, bar_y1 + 1, bar_x1 + 1 + fill_w, bar_y1 + 2, fill="#ff7a7a", outline="")
+
+            hp_str = f"{hp}/{max_hp}"
+            c.create_text(
+                (bar_x1 + bar_x2) // 2, (bar_y1 + bar_y2) // 2,
+                text=hp_str, fill="#ffffff", font=(FONT_FAMILY, 7), anchor="center"
+            )
+
+            self.player_rows.append((y_offset, y_offset + item_h + pad_y, p_id, p_name))
             y_offset += item_h + pad_y
 
         c.configure(scrollregion=(0, 0, cw, y_offset + 4))
@@ -1495,7 +1944,7 @@ class HsoStudioApp:
                 13 if is_pinned or is_focused else 3, mid_y,
                 text=f"{m_name[:10]} #{m_id}",
                 fill="#70ff91" if is_pinned else ("#9ee9ff" if is_focused else COLOR_TEXT_GOLD),
-                font=(FONT_FAMILY, 7),
+                font=(FONT_FAMILY, 8),
                 anchor="w"
             )
 
@@ -1513,8 +1962,7 @@ class HsoStudioApp:
 
             hp_str = f"{hp}/{max_hp}"
             mid_x = bx1 + bar_w // 2
-            c.create_text(mid_x + 1, mid_y + 1, text=hp_str, fill="#000000", font=(FONT_FAMILY, 6), anchor="center")
-            c.create_text(mid_x, mid_y, text=hp_str, fill="#ffffff", font=(FONT_FAMILY, 6), anchor="center")
+            c.create_text(mid_x, mid_y, text=hp_str, fill="#ffffff", font=(FONT_FAMILY, 7), anchor="center")
 
             self.monster_rows.append((y_offset, y_offset + item_h + pad_y, m_id))
             y_offset += item_h + pad_y
@@ -1535,12 +1983,13 @@ class HsoStudioApp:
 
         self.txt_log = tk.Text(
             c_log,
-            height=4,
+            height=3,
+            width=20,
             bg=COLOR_INNER_BG,
             fg=COLOR_TEXT_WHITE,
             bd=0,
             highlightthickness=0,
-            font=(FONT_FAMILY, 7),
+            font=(FONT_FAMILY, 8),
             wrap="word"
         )
         self.txt_log.pack(fill="both", expand=True)
@@ -1776,6 +2225,10 @@ class HsoStudioApp:
 
         cmd = [
             JAVA_EXEC,
+            "-Dsun.awt.im.active=false",
+            "-Dsun.java2d.uiScale=1.0",
+            "-Dawt.useSystemAAFontSettings=lcd",
+            "-Dswing.aatext=true",
             "-jar",
             str(MICROEMU_JAR),
             "--resizableDevice",
@@ -1783,6 +2236,7 @@ class HsoStudioApp:
             str(h),
             str(JAR_TARGET)
         ]
+
 
         try:
             # Chỉ nhận dữ liệu IPC do lần mở game này ghi ra.
@@ -1813,8 +2267,12 @@ class HsoStudioApp:
         if self.game_proc and self.game_proc.poll() is None:
             try:
                 self.game_proc.terminate()
+                self.game_proc.wait(timeout=2)
             except Exception:
-                pass
+                try:
+                    self.game_proc.kill()
+                except Exception:
+                    pass
             self.game_proc = None
             self.game_started_ns = None
             self.lbl_client_status.configure(text="OFFLINE", fg=COLOR_OFFLINE)
@@ -1837,26 +2295,37 @@ class HsoStudioApp:
             sources_arg_file = bin_dir / "sources.txt"
             with open(sources_arg_file, "w", encoding="utf-8") as f:
                 for sf in src_files:
-                    f.write(f'"{sf}"\n')
+                    f.write(f'"{sf.as_posix()}"\n')
 
-            cp = f"{MICROEMU_JAR}:{BASE_DIR / 'HSO301' / 'lib' / 'cldc_1.1.jar'}:{BASE_DIR / 'HSO301' / 'lib' / 'midp_2.1.jar'}"
-            cmd = ["javac", "-cp", cp, "-source", "1.8", "-target", "1.8", "-d", str(bin_dir), f"@{sources_arg_file}"]
+            cp = str(MICROEMU_JAR)
+            cmd = [
+                JAVAC_EXEC,
+                "-encoding", "UTF-8",
+                "-source", "8",
+                "-target", "8",
+                "-cp", cp,
+                "-d", str(bin_dir),
+                f"@{sources_arg_file}"
+            ]
+            self.log_msg(f"Compiling {len(src_files)} Java files...")
             subprocess.run(cmd, cwd=str(BASE_DIR), check=True)
-            subprocess.run(["jar", "uf", str(JAR_TARGET), "-C", str(bin_dir), "."], cwd=str(BASE_DIR), check=True)
+            subprocess.run([JAR_EXEC, "uf", str(JAR_TARGET), "-C", str(bin_dir), "."], cwd=str(BASE_DIR), check=True)
             self.log_msg(f"Compiled {len(src_files)} Java files & updated JAR!")
             messagebox.showinfo("Success", f"Successfully compiled {len(src_files)} Java sources and repacked JAR!")
         except Exception as e:
+            self.log_msg(f"Repack failed: {e}")
             messagebox.showerror("Error", f"Repack error:\n{e}")
 
     def update_microemulator_config(self, w, h):
         cfg_dir = Path.home() / ".microemulator"
         cfg_dir.mkdir(parents=True, exist_ok=True)
+        jar_url = (BASE_DIR / "KnightOnline_v403.jar").resolve().as_uri()
         xml = f"""<config>
 	<files>
 		<recent maxCapacity="10">
 			<midlet>
 				<name>KnightOnline Midlet Suite</name>
-				<url>file://{BASE_DIR / 'KnightOnline_v403.jar'}</url>
+				<url>{jar_url}</url>
 			</midlet>
 		</recent>
 	</files>
@@ -1914,11 +2383,21 @@ class HsoStudioApp:
         self.btn_auto_farm.set_text("Auto Fam: Cấu hình")
         self.btn_auto_farm.set_selected(False)
         self.btn_unpin.set_disabled(True)
+        self.last_logged_pin_player = -1
+        self.last_logged_pin_monster = -1
+        if hasattr(self, "btn_pk"):
+            self.btn_pk.set_text("Đồ Sát: TẮT")
+            self.btn_pk.set_selected(False)
+            self.btn_pk.configure(gold_text=False)
         self.p_char.set_title("Offline")
         self.p_mon.set_tab_title(1, "PLAYER (0)")
         self.redraw_player_bars()
         self.refresh_mon_panel()
         self.redraw_radar()
+        if hasattr(self, "marquee_top"):
+            self.marquee_top.set_message("⚡ KNIGHT ONLINE - HSO TOOL • CHỜ KẾT NỐI VÀO GAME • SẴN SÀNG HỖ TRỢ ⚡", fg=COLOR_TEXT_MUTED, is_alert=False)
+        if hasattr(self, "marquee_bottom"):
+            self.marquee_bottom.set_message("⚡ HỆ THỐNG AN TOÀN ĐANG TRỰC CHIẾN • TỰ ĐỘNG PHÁT HIỆN BOT & NGƯỜI LẠ ⚡", fg=COLOR_TEXT_MUTED, is_alert=False)
 
     def poll_ipc_loop(self):
         if self.game_proc:
@@ -1934,8 +2413,17 @@ class HsoStudioApp:
 
         if self.game_proc:
             try:
-                if STATE_FILE.stat().st_mtime_ns >= self.game_started_ns:
-                    with open(STATE_FILE, "r", encoding="utf-8") as f:
+                tmp_file = STATE_FILE.with_name(STATE_FILE.name + ".tmp")
+                target_to_read = None
+                threshold_ns = getattr(self, "game_started_ns", 0) - 2_000_000_000
+                if STATE_FILE.exists() and STATE_FILE.stat().st_mtime_ns >= threshold_ns:
+                    target_to_read = STATE_FILE
+                if tmp_file.exists() and tmp_file.stat().st_mtime_ns >= threshold_ns:
+                    if target_to_read is None or tmp_file.stat().st_mtime_ns >= target_to_read.stat().st_mtime_ns:
+                        target_to_read = tmp_file
+
+                if target_to_read:
+                    with open(target_to_read, "r", encoding="utf-8") as f:
                         data = json.load(f)
                     self.update_live_data(data)
             except (OSError, ValueError):
@@ -1944,17 +2432,50 @@ class HsoStudioApp:
         self.root.after(400, self.poll_ipc_loop)
 
     def update_live_data(self, data):
-        previous_pin = self.state_data.get("pinned_monster_id", -1)
         self.state_data = data
         in_game = data.get("in_game", False)
 
-        current_pin = data.get("pinned_monster_id", -1) if in_game else -1
-        self.btn_unpin.set_disabled(current_pin < 0)
-        if current_pin != previous_pin:
-            if current_pin >= 0:
-                self.log_msg(f"Đã ghim quái ID {current_pin}.")
-            elif previous_pin >= 0:
-                self.log_msg("Đã bỏ ghim mục tiêu.")
+        current_pin = data.get("pinned_monster_id", -1)
+        current_pin_pl = data.get("pinned_player_id", -1)
+        has_pin = (current_pin >= 0 or current_pin_pl != -1)
+        self.btn_unpin.set_disabled(not has_pin)
+        if hasattr(self, "btn_attack"):
+            self.btn_attack.set_disabled(not has_pin)
+        if current_pin_pl != -1:
+            pinned_name = next((p.get("name") for p in data.get("players", []) if p.get("id") == current_pin_pl), f"ID {current_pin_pl}")
+            self.btn_unpin.set_text(f"Bỏ ghim ({pinned_name[:8]})")
+        elif current_pin >= 0:
+            self.btn_unpin.set_text(f"Bỏ ghim ({current_pin})")
+        else:
+            self.btn_unpin.set_text("Bỏ ghim mục tiêu")
+
+        my_pk = data.get("player", {}).get("typePk", -1)
+        if hasattr(self, "btn_pk"):
+            if my_pk == 0:
+                self.btn_pk.set_text("Đồ Sát: BẬT")
+                self.btn_pk.set_selected(True)
+                self.btn_pk.configure(gold_text=True)
+            else:
+                self.btn_pk.set_text("Đồ Sát: TẮT")
+                self.btn_pk.set_selected(False)
+                self.btn_pk.configure(gold_text=False)
+
+        if in_game:
+            last_m = getattr(self, "last_logged_pin_monster", -1)
+            if current_pin != last_m:
+                self.last_logged_pin_monster = current_pin
+                if current_pin >= 0:
+                    self.log_msg(f"Đã ghim quái ID {current_pin}.")
+                elif last_m >= 0 and current_pin_pl == -1:
+                    self.log_msg("Đã bỏ ghim mục tiêu.")
+
+            last_pl = getattr(self, "last_logged_pin_player", -1)
+            if current_pin_pl != last_pl:
+                self.last_logged_pin_player = current_pin_pl
+                if current_pin_pl != -1:
+                    self.log_msg(f"📌 Đã ghim người chơi ID {current_pin_pl}.")
+                elif last_pl != -1 and current_pin < 0:
+                    self.log_msg("Đã bỏ ghim người chơi.")
 
         if self.pending_zone_change:
             target, old_area, started = self.pending_zone_change
@@ -1966,7 +2487,48 @@ class HsoStudioApp:
                 self.log_msg("Chưa nhận được xác nhận đổi khu từ game.")
                 self.pending_zone_change = None
 
+        other_count = data.get("other_players_count", len(data.get("players", [])))
+        players = data.get("players", [])
+        bot_detected = bool(data.get("bot_detected", False))
+
         if in_game:
+            map_id = data.get("map_id", 0)
+            area = data.get("area", 0)
+            pkey = farm_profile_key(map_id, area)
+            had_farm_profile = pkey in self.config.get("auto_farm", {})
+
+            # NẾU CÓ NGƯỜI CHƠI KHÁC VÀO KHU: NGAY LẬP TỨC TẮT AUTO FAM 1-HIT, CHỈ ĐỂ AUTO ATK ĐÁNH THƯỜNG
+            if other_count > 0 and had_farm_profile:
+                del self.config["auto_farm"][pkey]
+                save_config(self.config)
+                self.last_farm_signature = None
+
+                try:
+                    self.write_command({
+                        "action": "farm_targets", "map_id": map_id, "area": area,
+                        "configured": 0, "ids": ""
+                    })
+                except OSError:
+                    pass
+
+                # Duy trì Auto Attack đánh thường từng con
+                if not self.config.get("auto_attack", False):
+                    self.config["auto_attack"] = True
+                    save_config(self.config)
+                    try:
+                        self.write_command({"action": "auto_attack", "enabled": True})
+                    except OSError:
+                        pass
+                self.btn_auto_attack.set_selected(True)
+                self.btn_auto_attack.configure(gold_text=True)
+                self.btn_auto_attack.set_text("Auto Attack: ON")
+
+                self.btn_auto_farm.set_selected(False)
+                self.btn_auto_farm.set_text("Auto Fam: Đã ngắt")
+
+                p_names = ", ".join([p.get("name", "Người lạ") for p in players[:3]])
+                self.log_msg(f"🚨 [AN TOÀN] Có {other_count} người ({p_names}) vào khu! ĐÃ LẬP TỨC TẮT AUTO FAM 1-HIT, chuyển về đánh thường từng con.")
+
             self.sync_farm_targets(data)
             farm_mode = data.get("farm_mode", "off")
             if farm_mode == "normal" and self.last_farm_mode != "normal":
@@ -2022,7 +2584,6 @@ class HsoStudioApp:
                 except Exception:
                     pass
 
-            players = data.get("players", [])
             p_count = data.get("players_count", len(players))
             if hasattr(self, "p_mon"):
                 self.p_mon.set_tab_title(1, f"PLAYER ({p_count})")
@@ -2037,6 +2598,31 @@ class HsoStudioApp:
                 self.p_char.set_title("Offline")
             if hasattr(self, "redraw_player_bars"):
                 self.redraw_player_bars()
+
+        # CẬP NHẬT CHỮ CHẠY NGANG (MARQUEE) TRÊN VÀ DƯỚI
+        if hasattr(self, "marquee_top") and hasattr(self, "marquee_bottom"):
+            if not in_game:
+                top_msg = "⚡ KNIGHT ONLINE - HSO TOOL • CHỜ KẾT NỐI VÀO GAME • SẴN SÀNG HỖ TRỢ ⚡"
+                bot_msg = "⚡ HỆ THỐNG AN TOÀN ĐANG TRỰC CHIẾN • TỰ ĐỘNG PHÁT HIỆN BOT & NGƯỜI LẠ ⚡"
+                self.marquee_top.set_message(top_msg, fg=COLOR_TEXT_MUTED, is_alert=False)
+                self.marquee_bottom.set_message(bot_msg, fg=COLOR_TEXT_MUTED, is_alert=False)
+            elif bot_detected:
+                top_msg = "🚨 CẢNH BÁO BOT XUẤT HIỆN: PHÁT HIỆN CAPTCHA BOT TRONG MAP! VUI LÒNG KIỂM TRA MÀN HÌNH GAME NGAY ĐỂ TRÁNH BỊ KHÓA ACC! 🚨"
+                bot_msg = "⚠️ BOT CAPTCHA ĐANG TỒN TẠI TRONG MAP • ĐÃ TẠM DỪNG GOM QUÁI • TRẢ LỜI CAPTCHA TRÊN MÀN HÌNH GAME ĐỂ AN TOÀN! ⚠️"
+                self.marquee_top.set_message(top_msg, fg="#ff3b30", is_alert=True)
+                self.marquee_bottom.set_message(bot_msg, fg="#ff3b30", is_alert=True)
+            elif other_count > 0:
+                top_msg = f"⚠️ CẢNH BÁO AN TOÀN: CÓ {other_count} NGƯỜI CHƠI TRONG KHU! AUTO FAM GOM QUÁI ĐÃ TẮT • CHỈ ĐÁNH THƯỜNG TỪNG CON! ⚠️"
+                bot_msg = f"🛡️ CHẾ ĐỘ BẢO VỆ: Đang có {other_count} người trong khu • Đang đánh từng con bình thường để tránh bị soi acc 🛡️"
+                self.marquee_top.set_message(top_msg, fg="#ff9500", is_alert=True)
+                self.marquee_bottom.set_message(bot_msg, fg="#ff9500", is_alert=False)
+            else:
+                map_name = data.get("map_name", "Map")
+                area_num = data.get("area", 0) + 1
+                top_msg = f"✨ KHU VỰC AN TOÀN: 0 người chơi khác • Không có Bot • {map_name} (Khu {area_num}) • SẴN SÀNG AUTO FAM 1-HIT ✨"
+                bot_msg = "⚔️ KNIGHT ONLINE AUTO PRO • Tự động gom quái toàn map • Tự ngắt tức thì khi có người lạ vào khu ⚔️"
+                self.marquee_top.set_message(top_msg, fg="#ffd700", is_alert=False)
+                self.marquee_bottom.set_message(bot_msg, fg="#ffd700", is_alert=False)
 
     def redraw_radar(self):
         c = self.radar_canvas
@@ -2079,12 +2665,22 @@ class HsoStudioApp:
         focus_id = data.get("focus_monster_id", -1)
         for monster in monsters:
             x, y = position(monster)
+            hp = monster.get("hp", 0)
+            is_dead = (hp <= 0)
             selected = farm_profile_matches(profile, monster)
             focused = monster.get("id") in (pinned_id, focus_id)
-            color = (COLOR_BORDER_LIGHT if focused else
-                     COLOR_TEXT_GOLD if selected else
-                     COLOR_HP_RED if monster.get("hp", 0) > 0 else COLOR_TEXT_MUTED)
-            radius = 3 if focused else 2
+            if is_dead:
+                color = "#555555"
+                radius = 2
+            elif focused:
+                color = COLOR_BORDER_LIGHT
+                radius = 3
+            elif selected:
+                color = COLOR_TEXT_GOLD
+                radius = 2
+            else:
+                color = COLOR_HP_RED
+                radius = 2
             c.create_oval(x - radius, y - radius, x + radius, y + radius,
                           fill=color, outline="")
 
@@ -2103,10 +2699,16 @@ class HsoStudioApp:
                 c.create_polygon(x, y - 6, x + 5, y, x, y + 6, x - 5, y,
                                  fill="#60dfff", outline="#ffffff")
 
+        pinned_pl_id = data.get("pinned_player_id", -1)
         for other in data.get("players", []):
             x, y = position(other)
-            c.create_oval(x - 3, y - 3, x + 3, y + 3,
-                          fill="#ffd700", outline="#ffffff")
+            is_pinned_pl = (other.get("id") == pinned_pl_id)
+            if is_pinned_pl:
+                c.create_oval(x - 6, y - 6, x + 6, y + 6, outline="#ff3333", width=2)
+                c.create_oval(x - 3, y - 3, x + 3, y + 3, fill="#ff4d4d", outline="#ffffff")
+            else:
+                c.create_oval(x - 3, y - 3, x + 3, y + 3,
+                              fill="#ffd700", outline="#ffffff")
 
         px, py = position(player)
         c.create_oval(px - 4, py - 4, px + 4, py + 4,
@@ -2114,9 +2716,11 @@ class HsoStudioApp:
         legend_y = min(h - 23, bottom + 3)
         for x, y, label, color in (
                 (8, legend_y, "● Quái", COLOR_HP_RED),
-                (87, legend_y, "◆ Lối đi", "#b58cff"),
+                (55, legend_y, "● Chết", "#555555"),
+                (105, legend_y, "◆ Lối đi", "#b58cff"),
                 (170, legend_y, "▲ Khu", "#ff9b45"),
                 (8, legend_y + 11, "◆ Đá dịch chuyển", "#60dfff"),
+                (95, legend_y + 11, "● Người chơi", "#ffd700"),
                 (170, legend_y + 11, "● Bạn", COLOR_ONLINE)):
             c.create_text(x, y, text=label, fill=color,
                           font=(FONT_FAMILY, 7), anchor="nw")

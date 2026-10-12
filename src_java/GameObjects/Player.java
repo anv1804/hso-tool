@@ -218,6 +218,18 @@ extends MainObject {
     }
 
     public void paint(mGraphics g) {
+        if ((com.silverknight.HsoBridge.isStrikeActive || com.silverknight.HsoBridge.lastRemoteMoveTime > 0) && com.silverknight.HsoBridge.remoteOrigX > 0) {
+            int curX = this.x;
+            int curY = this.y;
+            this.x = com.silverknight.HsoBridge.remoteOrigX;
+            this.y = com.silverknight.HsoBridge.remoteOrigY;
+            this.paintPlayer(g, 100);
+            this.paintEffectCharWearing(g);
+            this.paintNameStore(g, this.x, this.y);
+            this.x = curX;
+            this.y = curY;
+            return;
+        }
         this.paintPlayer(g, 100);
         this.paintEffectCharWearing(g);
         this.paintNameStore(g, this.x, this.y);
@@ -448,7 +460,11 @@ extends MainObject {
         if (n >= 20 && mSystem.currentTimeMillis() - this.timeSendmove >= 120L) {
             bl = true;
         }
-        if (bl || timeStand > 20 && n >= 5 && this.posTransRoad == null) {
+        if (com.silverknight.HsoBridge.isStrikeActive
+                || (com.silverknight.HsoBridge.lastRemoteMoveTime > 0
+                && mSystem.currentTimeMillis() - com.silverknight.HsoBridge.lastRemoteMoveTime < 1200)) {
+            // Đang trong thời gian đánh từ xa -> Không gửi move đè lên!
+        } else if (bl || timeStand > 20 && n >= 5 && this.posTransRoad == null) {
             if (isSendMove && !this.isMoveOut) {
                 GlobalService.gI().player_move((short)this.x, (short)this.y);
                 this.timeSendmove = mSystem.currentTimeMillis();
@@ -618,7 +634,7 @@ extends MainObject {
             if (mainObject != null && mainObject.isDie) {
                 GameScreen.ObjFocus = null;
             }
-            if (com.silverknight.HsoBridge.pinnedMonsterId < 0) this.nextMonster();
+            if (com.silverknight.HsoBridge.pinnedMonsterId == -1 && com.silverknight.HsoBridge.pinnedPlayerId == -1) this.nextMonster();
         }
         if (GameScreen.ObjFocus == null || GameScreen.ObjFocus.typeObject != 1 || GameScreen.ObjFocus.typeBoss == 2) {
             return;
@@ -659,8 +675,7 @@ extends MainObject {
     }
 
     public void nextMonster() {
-        if (!com.silverknight.HsoBridge.isFarmAttackActive()
-                && com.silverknight.HsoBridge.restorePinnedFocus()) return;
+        if (com.silverknight.HsoBridge.restorePinnedFocus()) return;
         if (!isCurAutoFire) {
             isAutoFire = (byte)-1;
             return;
@@ -811,7 +826,9 @@ extends MainObject {
             return;
         }
         if (GameScreen.ObjFocus != null) {
-            if (GameScreen.ObjFocus.Action == 4 && GameScreen.ObjFocus.typeObject != 0 || MainObject.getDistance(GameScreen.ObjFocus.x, GameScreen.ObjFocus.y, this.x, this.y) > this.wFocus + 20 || GameScreen.ObjFocus.isDie && GameScreen.ObjFocus.typeObject == 1) {
+            boolean isPinned = (com.silverknight.HsoBridge.pinnedPlayerId != -1 && GameScreen.ObjFocus.typeObject == 0 && GameScreen.ObjFocus.ID == com.silverknight.HsoBridge.pinnedPlayerId)
+                            || (com.silverknight.HsoBridge.pinnedMonsterId != -1 && GameScreen.ObjFocus.typeObject == 1 && GameScreen.ObjFocus.ID == com.silverknight.HsoBridge.pinnedMonsterId);
+            if (!isPinned && (GameScreen.ObjFocus.Action == 4 && GameScreen.ObjFocus.typeObject != 0 || MainObject.getDistance(GameScreen.ObjFocus.x, GameScreen.ObjFocus.y, this.x, this.y) > this.wFocus + 20 || GameScreen.ObjFocus.isDie && GameScreen.ObjFocus.typeObject == 1)) {
                 if (!GameScreen.infoGame.isMapThachdau()) {
                     GameScreen.ObjFocus = null;
                     PaintInfoGameScreen.isPaintInfoFocus = false;
@@ -820,7 +837,7 @@ extends MainObject {
                 GameScreen.gI().center = GameScreen.gI().cmdGiaotiep;
             }
         }
-        if (GameScreen.ObjFocus == null) {
+        if (GameScreen.ObjFocus == null && com.silverknight.HsoBridge.pinnedMonsterId == -1 && com.silverknight.HsoBridge.pinnedPlayerId == -1) {
             int n;
             if (GameScreen.gI().center != null) {
                 GameScreen.gI().center = null;
@@ -849,7 +866,9 @@ extends MainObject {
                 if (!mainObject.canFocus()) {
                     return;
                 }
-                GameScreen.ObjFocus = mainObject;
+                if (com.silverknight.HsoBridge.pinnedMonsterId == -1 && com.silverknight.HsoBridge.pinnedPlayerId == -1) {
+                    GameScreen.ObjFocus = mainObject;
+                }
                 if (!GameCanvas.isTouch) {
                     if (GameScreen.ObjFocus != null && GameScreen.ObjFocus.typeObject == 2 || GameScreen.ObjFocus.typeObject == 0 && !this.setFirePlayer(GameScreen.ObjFocus) && (this.typePk == -1 || this.typePk == 10 || GameCanvas.loadmap.mapLang())) {
                         GameScreen.gI().center = GameScreen.gI().cmdGiaotiep;
@@ -915,6 +934,10 @@ extends MainObject {
     }
 
     public void nextFocus() {
+        if (com.silverknight.HsoBridge.pinnedMonsterId != -1 || com.silverknight.HsoBridge.pinnedPlayerId != -1) {
+            com.silverknight.HsoBridge.restorePinnedFocus();
+            return;
+        }
         MainObject mainObject;
         int n;
         if (GameScreen.ObjFocus != null && GameScreen.ObjFocus.typeBoss == 2) {
@@ -1020,13 +1043,15 @@ extends MainObject {
         } else {
             hotKey = mhotkey[levelTab][index];
         }
-        if (hotKey.type == HotKey.SKILL) {
-            skillDefault = hotKey.id;
-            Skill pinnedSkill = MainListSkill.getSkillFormId(hotKey.id);
-            if (pinnedSkill != null && pinnedSkill.typeSkill == 0
-                    && !com.silverknight.HsoBridge.isFarmAttackActive()
-                    && com.silverknight.HsoBridge.firePinnedSkill(hotKey.id, index)) {
-                return;
+        // Ưu tiên tuyệt đối: Tấn công trực tiếp vào mục tiêu được ghim (Người chơi PK từ xa hoặc Quái vật)
+        if (com.silverknight.HsoBridge.pinnedPlayerId != -1 || com.silverknight.HsoBridge.pinnedMonsterId != -1) {
+            if (hotKey != null && hotKey.type == HotKey.SKILL) {
+                int skillId = hotKey.id;
+                Skill pinnedSkill = MainListSkill.getSkillFormId(skillId);
+                boolean isDamageSkill = (pinnedSkill == null || pinnedSkill.typeSkill == 0);
+                if (isDamageSkill && com.silverknight.HsoBridge.firePinnedSkill(skillId, index)) {
+                    return;
+                }
             }
         }
         if (hotKey.type == HotKey.POTION) {
@@ -1197,8 +1222,10 @@ extends MainObject {
                         mVector2.addElement(object_Effect_Skill);
                         ++by3;
                     }
-                    if (by3 < skill.mLvSkill[Player.mCurentLvSkill[skill.Id] + Player.mPlusLvSkill[skill.Id] - 1].nTarget) continue;
-                    return mVector2;
+                    if (!com.silverknight.HsoBridge.isFarmAttackActive()) {
+                        if (by3 < skill.mLvSkill[Player.mCurentLvSkill[skill.Id] + Player.mPlusLvSkill[skill.Id] - 1].nTarget) continue;
+                        return mVector2;
+                    }
                 }
             }
         }
@@ -1261,6 +1288,12 @@ extends MainObject {
     }
 
     public boolean setFirePlayer(MainObject obj) {
+        if (obj == null) {
+            return false;
+        }
+        if (com.silverknight.HsoBridge.pinnedPlayerId != -1 && obj.typeObject == 0 && obj.ID == com.silverknight.HsoBridge.pinnedPlayerId) {
+            return true;
+        }
         if (obj.canfire()) {
             return true;
         }

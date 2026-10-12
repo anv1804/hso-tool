@@ -794,6 +794,7 @@ extends MainScreen {
                     infoGame.paintInfoThachDau(g, 0, 0 - PaintInfoGameScreen.hShowInGame);
                     infoGame.paintInfoThachDauOtherPlayer(g, GameCanvas.w / 2 + 20, 0 - PaintInfoGameScreen.hShowInGame);
                     infoGame.paintInfoFocus(g);
+                    com.silverknight.HsoBridge.paintPinnedTargetHud(g);
                     if (!GameCanvas.isTouch && GameScreen.player.Action != 4) {
                         infoGame.paintKillPlayer(g);
                     }
@@ -983,14 +984,26 @@ extends MainScreen {
                 if (isMoveCamera) {
                     MainScreen.cameraMain.setCameraWithLim(xCur - xMoveCam, yCur - yMoveCam);
                 } else {
-                    MainScreen.cameraMain.moveCamera(GameScreen.player.x - GameCanvas.hw, GameScreen.player.y - GameCanvas.hh);
+                    int camX = GameScreen.player.x;
+                    int camY = GameScreen.player.y;
+                    if ((com.silverknight.HsoBridge.isStrikeActive || com.silverknight.HsoBridge.lastRemoteMoveTime > 0) && com.silverknight.HsoBridge.remoteOrigX > 0) {
+                        camX = com.silverknight.HsoBridge.remoteOrigX;
+                        camY = com.silverknight.HsoBridge.remoteOrigY;
+                    }
+                    MainScreen.cameraMain.moveCamera(camX - GameCanvas.hw, camY - GameCanvas.hh);
                 }
             } else {
                 MainObject mainObject = MainObject.get_Object(GameScreen.player.currentQuest.idNPCChat, (byte)2);
                 if (mainObject != null) {
                     MainScreen.cameraMain.moveCamera(GameScreen.player.x - GameCanvas.hw, mainObject.y - GameCanvas.hh - GameCanvas.hh / 4);
                 } else {
-                    MainScreen.cameraMain.moveCamera(GameScreen.player.x - GameCanvas.hw, GameScreen.player.y - GameCanvas.hh);
+                    int camX = GameScreen.player.x;
+                    int camY = GameScreen.player.y;
+                    if ((com.silverknight.HsoBridge.isStrikeActive || com.silverknight.HsoBridge.lastRemoteMoveTime > 0) && com.silverknight.HsoBridge.remoteOrigX > 0) {
+                        camX = com.silverknight.HsoBridge.remoteOrigX;
+                        camY = com.silverknight.HsoBridge.remoteOrigY;
+                    }
+                    MainScreen.cameraMain.moveCamera(camX - GameCanvas.hw, camY - GameCanvas.hh);
                 }
             }
             MainScreen.cameraMain.UpdateCamera();

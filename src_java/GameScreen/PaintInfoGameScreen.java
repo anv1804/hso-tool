@@ -1305,9 +1305,7 @@ public class PaintInfoGameScreen {
                             object = Player.mhotkey[Player.levelTab][n];
                             if (isLevelPoint) {
                                 if (((HotKey)object).type == HotKey.SKILL) {
-                                    if (GameScreen.ObjFocus != null) {
-                                        GameScreen.player.setActionHotKey(n, false);
-                                    }
+                                    GameScreen.player.setActionHotKey(n, false);
                                 } else {
                                     keyPoint = n == 2 ? 5 : mKeySkill[n > 1 ? n - 1 : n];
                                     GameCanvas.keyMyPressed[20 + PaintInfoGameScreen.keyPoint] = true;

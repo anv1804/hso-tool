@@ -45,11 +45,16 @@ extends MainListSkill {
         this.obj = obj;
         Object_Effect_Skill object_Effect_Skill = (Object_Effect_Skill)vec.elementAt(0);
         this.objBeKill = MainObject.get_Object(object_Effect_Skill.ID, object_Effect_Skill.tem);
+        if (this.objBeKill == null && GameScreen.ObjFocus != null && GameScreen.ObjFocus.ID == object_Effect_Skill.ID) {
+            this.objBeKill = GameScreen.ObjFocus;
+        }
         this.vecObjBeKill = vec;
         if (this.obj == null || this.obj.Action == 4 || this.objBeKill == null || this.objBeKill.Action == 4) {
-            obj.KillFire = -1;
-            obj.IDAttack = -1;
-            obj.vecObjFocusSkill = null;
+            if (this.obj != null) {
+                this.obj.KillFire = -1;
+                this.obj.IDAttack = -1;
+                this.obj.vecObjFocusSkill = null;
+            }
             return;
         }
         this.skill = obj.typeObject == 9 ? MainListSkill.mSkillAllClasses[6][IndexSkill] : MainListSkill.mSkillAllClasses[obj.clazz][IndexSkill];
@@ -73,13 +78,18 @@ extends MainListSkill {
     }
 
     public void FireSkill(int range) {
+        boolean isPinned = (this.objBeKill != null && (
+            (com.silverknight.HsoBridge.pinnedPlayerId != -1 && this.objBeKill.typeObject == 0 && this.objBeKill.ID == com.silverknight.HsoBridge.pinnedPlayerId) ||
+            (com.silverknight.HsoBridge.pinnedMonsterId != -1 && this.objBeKill.typeObject == 1 && this.objBeKill.ID == com.silverknight.HsoBridge.pinnedMonsterId)
+        ));
         int n2 = MainObject.getDistance(this.obj.x, this.obj.y, this.objBeKill.x, this.objBeKill.y - this.objBeKill.hOne / 4);
-        if (n2 <= range || this.obj.typeObject == 9) {
+        if (isPinned || n2 <= range || this.obj.typeObject == 9) {
             if (this.obj != GameScreen.player || this.setMove_Skill()) {
                 this.obj.toX = this.obj.x;
                 this.obj.toY = this.obj.y;
                 this.obj.vx = 0;
                 this.obj.vy = 0;
+                this.obj.posTransRoad = null;
                 if (this.obj.typeObject != 9) {
                     this.obj.beginFire();
                     this.obj.PlashNow.setPlash(this.plash);
@@ -168,7 +178,10 @@ extends MainListSkill {
     }
 
     public void fireSkillFree() {
-        if (this.obj == null || this.objBeKill == null) {
+        if (this.obj == null) {
+            return;
+        }
+        if (this.objBeKill == null) {
             this.obj.KillFire = -1;
             this.obj.IDAttack = -1;
             this.obj.vecObjFocusSkill = null;
@@ -188,7 +201,10 @@ extends MainListSkill {
     }
 
     public void updateEffSkill() {
-        if (this.obj == null || this.objBeKill == null) {
+        if (this.obj == null) {
+            return;
+        }
+        if (this.objBeKill == null) {
             this.obj.KillFire = -1;
             this.obj.IDAttack = -1;
             this.obj.vecObjFocusSkill = null;
@@ -337,17 +353,21 @@ extends MainListSkill {
             }
             GameCanvas.addInfoChar(T.farfocus);
             this.setGoBack();
-            this.obj.KillFire = -1;
-            this.obj.IDAttack = -1;
-            this.obj.vecObjFocusSkill = null;
+            if (this.obj != null) {
+                this.obj.KillFire = -1;
+                this.obj.IDAttack = -1;
+                this.obj.vecObjFocusSkill = null;
+            }
             return false;
         }
         if (sArray.length > 12) {
             GameCanvas.addInfoChar(T.farfocus);
             this.setGoBack();
-            this.obj.KillFire = -1;
-            this.obj.IDAttack = -1;
-            this.obj.vecObjFocusSkill = null;
+            if (this.obj != null) {
+                this.obj.KillFire = -1;
+                this.obj.IDAttack = -1;
+                this.obj.vecObjFocusSkill = null;
+            }
             return false;
         }
         return true;
@@ -381,8 +401,10 @@ extends MainListSkill {
             if ((n12 = GameCanvas.loadmap.getTile(x, y)) != 1 && n12 != -1) continue;
             GameCanvas.addInfoChar(T.farfocus);
             this.setGoBack();
-            this.obj.KillFire = -1;
-            this.obj.IDAttack = -1;
+            if (this.obj != null) {
+                this.obj.KillFire = -1;
+                this.obj.IDAttack = -1;
+            }
             return false;
         }
         return true;
@@ -404,9 +426,40 @@ extends MainListSkill {
         if (this.classbuff > -1) {
             this.setSendBuff(mVector2);
         } else if (this.objBeKill.typeObject == 1) {
-            GlobalService.gI().fire_monster(mVector2, (byte)this.index);
+            short origX = (short)this.obj.x;
+            short origY = (short)this.obj.y;
+            boolean needMove = (this.obj == GameScreen.player && this.objBeKill != null
+                    && MainObject.getDistance(origX, origY, this.objBeKill.x, this.objBeKill.y) > 60);
+            if (needMove) {
+                com.silverknight.HsoBridge.lastRemoteMoveTime = System.currentTimeMillis();
+                com.silverknight.HsoBridge.lastRemoteTargetX = (short)this.objBeKill.x;
+                com.silverknight.HsoBridge.lastRemoteTargetY = (short)this.objBeKill.y;
+                GlobalService.gI().player_move((short)this.objBeKill.x, (short)this.objBeKill.y);
+            }
+            if (mVector2.size() <= 7) {
+                GlobalService.gI().fire_monster(mVector2, (byte)this.index);
+            } else {
+                for (int i = 0; i < mVector2.size(); i += 7) {
+                    mVector chunk = new mVector("Chunked skill targets");
+                    for (int j = i; j < i + 7 && j < mVector2.size(); ++j) {
+                        chunk.addElement(mVector2.elementAt(j));
+                    }
+                    GlobalService.gI().fire_monster(chunk, (byte)this.index);
+                }
+            }
         } else if (this.objBeKill.typeObject == 0) {
-            GlobalService.gI().fire_Pk(mVector2, (byte)this.index);
+            // Nếu đang có remote strike thread chạy -> bỏ qua, tránh gói gửi sai thứ tự
+            if (com.silverknight.HsoBridge.isStrikeActive) {
+                com.silverknight.HsoBridge.logDebug("sendSkill PK: skipped (strike in progress)");
+                return;
+            }
+            int dist = MainObject.getDistance(this.obj.x, this.obj.y, this.objBeKill.x, this.objBeKill.y);
+            com.silverknight.HsoBridge.logDebug("sendSkill PK: player.typePk=" + this.obj.typePk + " target=" + this.objBeKill.name + "(id=" + this.objBeKill.ID + ",typePk=" + this.objBeKill.typePk + ") dist=" + dist + " skillId=" + this.index + " targets=" + mVector2.size());
+            if (this.obj == GameScreen.player && this.objBeKill != null && dist > 50) {
+                com.silverknight.HsoBridge.executeRemotePkStrike(this.objBeKill, this.index, mVector2);
+            } else {
+                GlobalService.gI().fire_Pk(mVector2, (byte)this.index);
+            }
         }
     }
 
