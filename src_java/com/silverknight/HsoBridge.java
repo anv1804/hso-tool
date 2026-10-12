@@ -1046,43 +1046,46 @@ public class HsoBridge {
                     remoteOrigY = startY;
                     lastRemoteMoveTime = System.currentTimeMillis();
 
-                    // Bước 1: Chia nhỏ bước dịch chuyển ảo (32-40px mỗi bước) để qua mặt bộ lọc khoảng cách/anticheat của Server
-                    int dist = MainObject.getDistance(startX, startY, targetX, targetY);
-                    int steps = dist / 36;
-                    if (steps < 1) steps = 1;
-                    if (steps > 12) steps = 12;
-
-                    for (int i = 1; i <= steps; ++i) {
-                        int curStepX = startX + (targetX - startX) * i / steps;
-                        int curStepY = startY + (targetY - startY) * i / steps;
-                        GlobalService.gI().player_move((short)curStepX, (short)curStepY);
-                        if (steps > 1) {
-                            try { Thread.sleep(15); } catch (Exception ignored) {}
-                        }
+                    // Vị trí ảo trước mặt mục tiêu 24px để lọt vào tầm đánh của cả đòn đánh thường và skill xa
+                    int dx = targetX - startX;
+                    int dy = targetY - startY;
+                    int dist = MainObject.getDistance(dx, dy);
+                    int strikeX = targetX;
+                    int strikeY = targetY;
+                    if (dist > 30) {
+                        strikeX = targetX - (dx * 24 / dist);
+                        strikeY = targetY - (dy * 24 / dist);
                     }
 
-                    // Đủ thời gian (100ms) để server xử lý chu kỳ tick nhận vị trí mới của nhân vật
-                    try { Thread.sleep(100); } catch (Exception ignored) {}
+                    // Bước 1: Bước nhảy ảo tới mục tiêu (tối đa 2 bước siêu nhanh để server không giật lag)
+                    if (dist > 300) {
+                        int midX = (startX + strikeX) / 2;
+                        int midY = (startY + strikeY) / 2;
+                        GlobalService.gI().player_move((short)midX, (short)midY);
+                        try { Thread.sleep(12); } catch (Exception ignored) {}
+                    }
+                    GlobalService.gI().player_move((short)strikeX, (short)strikeY);
+
+                    // Chờ nhẹ 35ms để server nhận tọa độ
+                    try { Thread.sleep(35); } catch (Exception ignored) {}
 
                     // Bước 2: Gửi gói tấn công PK
                     GlobalService.gI().fire_Pk(targets, (byte)skillId);
-                    logDebug("executeRemotePkStrike FIRED at (" + targetX + "," + targetY + ")");
+                    logDebug("executeRemotePkStrike FIRED at (" + strikeX + "," + strikeY + ")");
 
-                    // Đợi server xử lý va chạm và broadcast gói trừ máu Fire_Object
-                    try { Thread.sleep(160); } catch (Exception ignored) {}
+                    // Chờ server xử lý đòn đánh 35ms
+                    try { Thread.sleep(35); } catch (Exception ignored) {}
 
-                    // Bước 3: Rút vị trí server-side quay ngược về vị trí gốc
-                    for (int i = steps - 1; i >= 0; --i) {
-                        int curStepX = startX + (targetX - startX) * i / steps;
-                        int curStepY = startY + (targetY - startY) * i / steps;
-                        GlobalService.gI().player_move((short)curStepX, (short)curStepY);
-                        if (steps > 1) {
-                            try { Thread.sleep(12); } catch (Exception ignored) {}
-                        }
+                    // Bước 3: Rút vị trí server-side lập tức về vị trí gốc
+                    if (dist > 300) {
+                        int midX = (startX + strikeX) / 2;
+                        int midY = (startY + strikeY) / 2;
+                        GlobalService.gI().player_move((short)midX, (short)midY);
+                        try { Thread.sleep(10); } catch (Exception ignored) {}
                     }
                     GlobalService.gI().player_move((short)startX, (short)startY);
 
-                    // Khóa vị trí local tuyệt đối không cho phép server-echo giật hình
+                    // Đồng bộ giữ vững vị trí local tại startX, startY
                     if (GameScreen.player != null) {
                         GameScreen.player.x = startX;
                         GameScreen.player.y = startY;
@@ -1090,21 +1093,17 @@ public class HsoBridge {
                         GameScreen.player.toY = startY;
                         GameScreen.player.xStand = (short)startX;
                         GameScreen.player.yStand = (short)startY;
+                        GameScreen.player.vx = 0;
+                        GameScreen.player.vy = 0;
+                        GameScreen.player.posTransRoad = null;
                         GameScreen.player.timeSendmove = System.currentTimeMillis();
                     }
 
-                    // Duy trì trạng thái bảo vệ thêm 300ms để nuốt trọn các gói objectMove trễ từ server
-                    try { Thread.sleep(300); } catch (Exception ignored) {}
-
-                    lastRemoteMoveTime = 0;
-                    remoteOrigX = -1;
-                    remoteOrigY = -1;
+                    // Cập nhật timestamp bảo vệ để ReadMessenge.java nuốt toàn bộ các gói objectMove dội về trong 3 giây tiếp theo
+                    lastRemoteMoveTime = System.currentTimeMillis();
                     logDebug("executeRemotePkStrike RESTORED cleanly to (" + startX + "," + startY + ")");
                 } catch (Exception e) {
                     logDebug("executeRemotePkStrike error: " + e);
-                    lastRemoteMoveTime = 0;
-                    remoteOrigX = -1;
-                    remoteOrigY = -1;
                 } finally {
                     isStrikeActive = false;
                 }
@@ -1152,6 +1151,7 @@ public class HsoBridge {
         GameScreen.ObjFocus = target;
         PaintInfoGameScreen.isPaintInfoFocus = true;
         if (player.typePk != 0 && target.typePk == -1) {
+            player.typePk = 0;
             GlobalService.gI().set_Pk((byte)0);
             GameCanvas.addInfoChar("Tự động bật Đồ Sát!");
         }
@@ -1188,6 +1188,9 @@ public class HsoBridge {
             if (skillId == 0 && !ListSkill.canAttack()) {
                 return true;
             }
+            if (skillId == 0) {
+                ListSkill.doSetTimeAtt();
+            }
 
             pinnedPlayerX = targetPl.x;
             pinnedPlayerY = targetPl.y;
@@ -1195,6 +1198,7 @@ public class HsoBridge {
             PaintInfoGameScreen.isPaintInfoFocus = true;
 
             if (player.typePk != 0 && targetPl.typePk == -1) {
+                player.typePk = 0;
                 GlobalService.gI().set_Pk((byte)0);
                 GameCanvas.addInfoChar("Tự động bật Đồ Sát!");
             }

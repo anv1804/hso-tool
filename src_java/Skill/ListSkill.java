@@ -48,6 +48,12 @@ extends MainListSkill {
         if (this.objBeKill == null && GameScreen.ObjFocus != null && GameScreen.ObjFocus.ID == object_Effect_Skill.ID) {
             this.objBeKill = GameScreen.ObjFocus;
         }
+        if (this.objBeKill == null && com.silverknight.HsoBridge.pinnedPlayerId != -1 && object_Effect_Skill.ID == com.silverknight.HsoBridge.pinnedPlayerId) {
+            this.objBeKill = com.silverknight.HsoBridge.findPinnedPlayer();
+        }
+        if (this.objBeKill == null && com.silverknight.HsoBridge.pinnedMonsterId != -1 && object_Effect_Skill.ID == com.silverknight.HsoBridge.pinnedMonsterId) {
+            this.objBeKill = com.silverknight.HsoBridge.findPinnedMonster();
+        }
         this.vecObjBeKill = vec;
         if (this.obj == null || this.obj.Action == 4 || this.objBeKill == null || this.objBeKill.Action == 4) {
             if (this.obj != null) {
@@ -78,10 +84,13 @@ extends MainListSkill {
     }
 
     public void FireSkill(int range) {
-        boolean isPinned = (this.objBeKill != null && (
-            (com.silverknight.HsoBridge.pinnedPlayerId != -1 && this.objBeKill.typeObject == 0 && this.objBeKill.ID == com.silverknight.HsoBridge.pinnedPlayerId) ||
-            (com.silverknight.HsoBridge.pinnedMonsterId != -1 && this.objBeKill.typeObject == 1 && this.objBeKill.ID == com.silverknight.HsoBridge.pinnedMonsterId)
-        ));
+        boolean isPinned = (
+            (this.objBeKill != null && (
+                (com.silverknight.HsoBridge.pinnedPlayerId != -1 && this.objBeKill.typeObject == 0 && this.objBeKill.ID == com.silverknight.HsoBridge.pinnedPlayerId) ||
+                (com.silverknight.HsoBridge.pinnedMonsterId != -1 && this.objBeKill.typeObject == 1 && this.objBeKill.ID == com.silverknight.HsoBridge.pinnedMonsterId)
+            )) ||
+            (this.obj == GameScreen.player && (com.silverknight.HsoBridge.pinnedPlayerId != -1 || com.silverknight.HsoBridge.pinnedMonsterId != -1))
+        );
         int n2 = MainObject.getDistance(this.obj.x, this.obj.y, this.objBeKill.x, this.objBeKill.y - this.objBeKill.hOne / 4);
         if (isPinned || n2 <= range || this.obj.typeObject == 9) {
             if (this.obj != GameScreen.player || this.setMove_Skill()) {
@@ -219,9 +228,10 @@ extends MainListSkill {
         } else if (this.obj.fplash == this.frame) {
             if (this.obj == GameScreen.player) {
                 Skill skill = MainListSkill.getSkillFormId(this.index);
+                int dur = (skill != null) ? skill.performDur : 350;
                 long l = GameCanvas.timeNow - lastTime;
                 if (l > (long)GlobalCountdown) {
-                    GlobalCountdown = skill.performDur;
+                    GlobalCountdown = dur;
                     lastTime = GameCanvas.timeNow;
                     this.sendSkill();
                 }
@@ -230,6 +240,9 @@ extends MainListSkill {
                 GameScreen.addEffectKillSubTime(MainListSkill.mEffectKill[this.skill], this.obj.ID, this.obj.typeObject, this.vecObjBeKill, (byte)MainListSkill.mBuffAllClasses[this.classbuff][this.index], 1250);
             } else {
                 GameScreen.addEffectKill(MainListSkill.mEffectKill[this.skill], this.obj.ID, this.obj.typeObject, this.vecObjBeKill);
+                if (this.obj == GameScreen.player && this.objBeKill != null && (com.silverknight.HsoBridge.pinnedPlayerId != -1 || com.silverknight.HsoBridge.pinnedMonsterId != -1)) {
+                    GameScreen.addEffectEndKill(MainListSkill.mEffectKill[this.skill], this.objBeKill.x, this.objBeKill.y - this.objBeKill.hOne / 2);
+                }
             }
         }
     }

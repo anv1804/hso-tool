@@ -511,9 +511,12 @@ extends AvMain {
                         return;
                     }
                     if (mainObject == GameScreen.player) {
-                        if (com.silverknight.HsoBridge.isStrikeActive
+                        long now = System.currentTimeMillis();
+                        boolean isRemoteGuarded = com.silverknight.HsoBridge.isStrikeActive
                                 || (com.silverknight.HsoBridge.lastRemoteMoveTime > 0
-                                && System.currentTimeMillis() - com.silverknight.HsoBridge.lastRemoteMoveTime < 2500)) {
+                                && now - com.silverknight.HsoBridge.lastRemoteMoveTime < 3000L);
+                        boolean isPinnedActive = (com.silverknight.HsoBridge.pinnedPlayerId != -1 || com.silverknight.HsoBridge.pinnedMonsterId != -1);
+                        if (isRemoteGuarded || (isPinnedActive && GameScreen.player.vx == 0 && GameScreen.player.vy == 0 && GameScreen.player.posTransRoad == null)) {
                             continue;
                         }
                         int distServer = MainObject.getDistance(GameScreen.player.x, GameScreen.player.y, s3, s4);

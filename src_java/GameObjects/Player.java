@@ -1154,6 +1154,9 @@ extends MainObject {
     }
 
     public boolean setDelaySkill(int t, int index) {
+        if (t == 0) {
+            return Skill.ListSkill.canAttack();
+        }
         if (mCurentLvSkill[t] - 1 < 0) {
             if (index >= 0) {
                 if (index == 2) {
@@ -1239,18 +1242,24 @@ extends MainObject {
                 Player.timeDelaySkill[i].limit = 2000;
                 Player.timeDelaySkill[i].timebegin = mSystem.currentTimeMillis();
             }
-        } else if (mKillPlayer[index] == t) {
-            Skill skill;
-            LvSkill lvSkill = MainListSkill.getSkillFormId((int)index).mLvSkill[mCurentLvSkill[index] + mPlusLvSkill[index] - 1];
-            Player.timeDelaySkill[index].value = lvSkill.getdelay();
-            Player.timeDelaySkill[index].limit = lvSkill.getdelay();
-            Player.timeDelaySkill[index].typeSkill = HotKey.SKILL;
-            Player.timeDelaySkill[index].timebegin = mSystem.currentTimeMillis();
-            if (lvSkill.mpLost > 0) {
-                this.mp -= lvSkill.mpLost;
-            }
-            if ((skill = MainListSkill.getSkillFormId(index)) != null && skill.typeSkill == 0) {
-                Player.timeDelaySkill[index].isSkillAttack = true;
+        } else if (mKillPlayer != null && index >= 0 && index < mKillPlayer.length && mKillPlayer[index] == t) {
+            Skill skill = MainListSkill.getSkillFormId((int)index);
+            if (skill != null && skill.mLvSkill != null && index < mCurentLvSkill.length && index < mPlusLvSkill.length
+                    && mCurentLvSkill[index] + mPlusLvSkill[index] - 1 >= 0
+                    && mCurentLvSkill[index] + mPlusLvSkill[index] - 1 < skill.mLvSkill.length) {
+                LvSkill lvSkill = skill.mLvSkill[mCurentLvSkill[index] + mPlusLvSkill[index] - 1];
+                Player.timeDelaySkill[index].value = lvSkill.getdelay();
+                Player.timeDelaySkill[index].limit = lvSkill.getdelay();
+                Player.timeDelaySkill[index].typeSkill = HotKey.SKILL;
+                Player.timeDelaySkill[index].timebegin = mSystem.currentTimeMillis();
+                if (lvSkill.mpLost > 0) {
+                    this.mp -= lvSkill.mpLost;
+                }
+                if (skill.typeSkill == 0) {
+                    Player.timeDelaySkill[index].isSkillAttack = true;
+                }
+            } else if (index == 0) {
+                Skill.ListSkill.doSetTimeAtt();
             }
         }
     }
