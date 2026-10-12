@@ -5,7 +5,8 @@
 | Thư mục / Tập tin | Mô tả |
 | :--- | :--- |
 | `src_csharp/` | **Mã nguồn C# tham chiếu** (226 files `.cs`). Dịch ngược từ `Assembly-CSharp.dll` bằng ILSpy. Không bị obfuscate, tên biến, tên hàm, cấu trúc class rõ ràng. |
-| `src_java/` | **Mã nguồn Java chính** (195 files `.java`). Dịch ngược từ `KnightOnline_v403.jar` bằng CFR. |
+| `src_java/` | **Mã nguồn Java chính** (195 files `.java`). Dịch ngược từ `KnightOnline_v403.jar` bằng CFR và đã được **khôi phục 3,265 tham số/biến** đối chiếu từ C# sang. |
+| `tools/restore_java_symbols.py` | Công cụ tự động đối chiếu AST/Signature giữa C# và Java để khôi phục tên tham số và biến gốc. |
 | `jar_resources/` | Toàn bộ tài nguyên gốc của bản Java (ảnh `x1/`, `weapon/`, `c/`, sprite, âm thanh, `icon.png`, `META-INF/MANIFEST.MF`). |
 | `extracted_exe/` | Toàn bộ file giải nén từ `HSO_v403B.exe` (Unity build, data, các dll Mono/Unity). |
 | `microemulator-3.0.0.jar` | Giả lập Java ME (CLDC/MIDP) chuyên dụng để chạy bản Java trên PC/Linux. |
