@@ -148,6 +148,7 @@ extends Cmd_Message {
             // empty catch block
         }
         this.send();
+        com.silverknight.HsoBridge.noteFarmPacketSent();
     }
 
     public void nap_tien(short type, String[] minfo) {
@@ -1185,4 +1186,3 @@ extends Cmd_Message {
         this.send();
     }
 }
-

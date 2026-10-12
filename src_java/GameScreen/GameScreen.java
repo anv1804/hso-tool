@@ -410,6 +410,7 @@ extends MainScreen {
                 break;
             }
             case 12: {
+                this.doArea();
                 break;
             }
             case 13: {
@@ -537,10 +538,10 @@ extends MainScreen {
         Item.VecItemSell.removeAllElements();
         mVector mVector2 = new mVector("Sell");
         byte by = 0;
-        TabShopNew tabShopNew = new TabShopNew(Item.VecInvetoryPlayer, 16, T.tabhanhtrang, -1, by);
+        TabShopNew tabShopNew = new TabShopNew(Item.VecInvetoryPlayer, (byte)16, T.tabhanhtrang, -1, by);
         mVector2.addElement(tabShopNew);
         mVector mVector3 = new mVector("info");
-        TabShopNew tabShopNew2 = new TabShopNew(mVector3, 15, T.gianHang, -1, 0);
+        TabShopNew tabShopNew2 = new TabShopNew(mVector3, (byte)15, T.gianHang, -1, (byte)0);
         mVector2.addElement(tabShopNew2);
         GameCanvas.shopNpc = new TabScreenNew();
         GameCanvas.shopNpc.selectTab = 0;
@@ -552,10 +553,10 @@ extends MainScreen {
         GameCanvas.end_Dialog();
         mVector mVector2 = new mVector("Sell");
         byte by = 0;
-        TabShopNew tabShopNew = new TabShopNew(Item.VecInvetoryPlayer, 16, T.tabhanhtrang, -1, by);
+        TabShopNew tabShopNew = new TabShopNew(Item.VecInvetoryPlayer, (byte)16, T.tabhanhtrang, -1, by);
         mVector2.addElement(tabShopNew);
         mVector mVector3 = new mVector("info");
-        TabShopNew tabShopNew2 = new TabShopNew(mVector3, 15, T.gianHang, -1, 0);
+        TabShopNew tabShopNew2 = new TabShopNew(mVector3, (byte)15, T.gianHang, -1, (byte)0);
         mVector2.addElement(tabShopNew2);
         GameCanvas.shopNpc = new TabScreenNew();
         GameCanvas.shopNpc.selectTab = 0;
@@ -1312,14 +1313,14 @@ extends MainScreen {
                 mainObject = MainObject.get_Object(idFrom, temFrom);
                 if (mainObject.x > 216) break block2;
                 for (int i = 0; i < 3; ++i) {
-                    EffectSkill effectSkill = new EffectSkill(mainObject.x, mainObject.y + 12, mainObject.x + posSkill[0][i], mainObject.y + posSkill[1][i], 0);
+                    EffectSkill effectSkill = new EffectSkill(mainObject.x, mainObject.y + 12, mainObject.x + posSkill[0][i], mainObject.y + posSkill[1][i], (byte)0);
                     EffectManager.addHiEffect(effectSkill);
                 }
                 break block3;
             }
             if (mainObject.x < 384) break block3;
             for (int i = 0; i < 3; ++i) {
-                EffectSkill effectSkill = new EffectSkill(mainObject.x, mainObject.y + 12, mainObject.x + posSkill[0][i], mainObject.y + posSkill[1][i], 1);
+                EffectSkill effectSkill = new EffectSkill(mainObject.x, mainObject.y + 12, mainObject.x + posSkill[0][i], mainObject.y + posSkill[1][i], (byte)1);
                 EffectManager.addHiEffect(effectSkill);
             }
         }
@@ -1461,7 +1462,7 @@ extends MainScreen {
                     for (n10 = 0; n10 < GameCanvas.loadmap.mapFind[n11].length; ++n10) {
                         n9 = (this.yStart + n10) * GameCanvas.loadmap.mapW + (this.xStart + n11);
                         if (n9 >= GameCanvas.loadmap.mapType.length - 1) continue;
-                        GameCanvas.loadmap.mapFind[n11][n10] = GameCanvas.loadmap.mapType[n9] == 1 || GameCanvas.loadmap.mapType[n9] == -1 ? -1 : 0;
+                        GameCanvas.loadmap.mapFind[n11][n10] = (byte)(GameCanvas.loadmap.mapType[n9] == 1 || GameCanvas.loadmap.mapType[n9] == -1 ? -1 : 0);
                     }
                 }
                 n11 = 0;
@@ -1817,7 +1818,7 @@ extends MainScreen {
     }
 
     static {
-        player = new Player(0, 0, "unname", 0, 0);
+        player = new Player(0, (byte)0, "unname", 0, 0);
         pet = null;
         ObjFocus = null;
         VecNum = new mVector("GameScr VecNum");
@@ -1855,4 +1856,3 @@ extends MainScreen {
         posSkill = new short[][]{{-72, 0, 120}, {144, 192, 120}};
     }
 }
-

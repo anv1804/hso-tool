@@ -92,7 +92,7 @@ public class CharPartInfo {
                     // empty catch block
                 }
                 if (dataInputStream != null) {
-                    this.image = object;
+                    this.image = (mImage)object;
                     FilePack.reset();
                     try {
                         int n;

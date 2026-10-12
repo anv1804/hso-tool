@@ -248,12 +248,13 @@ implements ISession {
                 n = Session_ME.this.dis.readUnsignedShort();
             }
             byArray = new byte[n];
-            by = 0;
+            int readCount = 0;
             int n2 = 0;
-            while (by != -1 && n2 < n) {
-                by = Session_ME.this.dis.read(byArray, n2, n - n2);
-                if (by <= 0) continue;
-                Session_ME.this.recvByteCount += 5 + (n2 += by);
+            while (readCount != -1 && n2 < n) {
+                readCount = Session_ME.this.dis.read(byArray, n2, n - n2);
+                if (readCount <= 0) continue;
+                n2 += readCount;
+                Session_ME.this.recvByteCount += 5 + n2;
             }
             if (Session_ME.this.getKeyComplete) {
                 for (int i = 0; i < byArray.length; ++i) {

@@ -43,6 +43,35 @@ implements Runnable {
         hMain = (hMain + mGraphics.zoomLevel - 1) / mGraphics.zoomLevel;
     }
 
+    protected void sizeChanged(int w, int h) {
+        wMain = w;
+        hMain = h;
+        this.checkZoomLevel(wMain, hMain);
+        if (gamecanvas != null) {
+            gamecanvas.getSize();
+            try {
+                if (GameCanvas.currentScreen != null) {
+                    if (GameCanvas.currentScreen == GameCanvas.login && GameCanvas.login != null) {
+                        GameCanvas.login.init();
+                        Map.BackGround.init();
+                    } else if (GameCanvas.currentScreen == GameCanvas.selectChar && GameCanvas.selectChar != null) {
+                        GameCanvas.selectChar.init();
+                    }
+                }
+                if (GameCanvas.loadmap != null) {
+                    GameCanvas.loadmap.limitW = GameCanvas.loadmap.maxWMap - GameCanvas.w;
+                    GameCanvas.loadmap.limitH = GameCanvas.loadmap.maxHMap - GameCanvas.h;
+                    if (GameScreen.MainScreen.cameraMain != null) {
+                        GameScreen.MainScreen.cameraMain.xLimit = GameCanvas.loadmap.limitW;
+                        GameScreen.MainScreen.cameraMain.yLimit = GameCanvas.loadmap.limitH;
+                    }
+                }
+            }
+            catch (Exception exception) {
+            }
+        }
+    }
+
     public void start() {
         new Thread(this).start();
     }
@@ -54,6 +83,7 @@ implements Runnable {
 
     protected void update() {
         gamecanvas.update();
+        HsoBridge.update();
     }
 
     public void run() {

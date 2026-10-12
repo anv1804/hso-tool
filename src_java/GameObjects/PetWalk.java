@@ -109,7 +109,7 @@ extends Pet {
 
     protected void attack() {
         if (this.skillDefault == null) {
-            this.skillDefault = new Monster_Skill(2);
+            this.skillDefault = new Monster_Skill((byte)2);
         }
         this.vMax = 9;
         if (this.vecObjskill != null && this.vecObjskill.size() > 0) {

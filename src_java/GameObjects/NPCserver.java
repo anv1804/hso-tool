@@ -66,7 +66,7 @@ extends MainObject {
         this.frameArray = frameArray;
         GameCanvas.loadmap.setBlockNPC_Server(this.xBlock - 12, this.yBlock, this.wBlock, this.hBlock);
         if (this.idImage != this.idnotFocus) {
-            this.p = new Other_Players(this.idImage, 0, this.name, this.x, this.y);
+            this.p = new Other_Players(this.idImage, (byte)0, this.name, this.x, this.y);
             this.p.clazz = 1;
             this.p.Direction = 0;
             this.p.setInfo(wearing[12], wearing[13], wearing[14]);
@@ -108,7 +108,7 @@ extends MainObject {
         this.frameArray = frameArray;
         GameCanvas.loadmap.setBlockNPC_Server(this.xBlock - 12, this.yBlock, this.wBlock, this.hBlock);
         if (this.idImage != this.idnotFocus) {
-            this.p = new Other_Players(this.idImage, 0, this.name, this.x, this.y);
+            this.p = new Other_Players(this.idImage, (byte)0, this.name, this.x, this.y);
             this.p.clazz = 1;
             this.p.Direction = 0;
             this.p.setInfo(wearing[12], wearing[13], wearing[14]);

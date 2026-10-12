@@ -57,11 +57,11 @@ extends MainDialog {
     }
 
     public void paint(mGraphics g) {
-        AvMain.paintDialog(mGraphics2, this.xDia, this.yDia, this.wDia, this.hDia, 2);
+        AvMain.paintDialog(g, this.xDia, this.yDia, this.wDia, this.hDia, 2);
         for (int i = 0; i < this.infopaint.length; ++i) {
             int n;
             int n2 = mFont.tahoma_7b_white.getWidth(this.infopaint[0]);
-            mFont.tahoma_7b_white.drawString(mGraphics2, this.infopaint[i], this.xDia + 10, this.yDia + 10 + i * this.h, 0, false);
+            mFont.tahoma_7b_white.drawString(g, this.infopaint[i], this.xDia + 10, this.yDia + 10 + i * this.h, 0, false);
             if (i == 0) {
                 n = 0;
                 n = (int)(this.currTime * (long)(this.wDia - n2) / (long)this.timesv);
@@ -71,20 +71,20 @@ extends MainDialog {
                 if (this.currTime <= 0L) {
                     n = 0;
                 }
-                mGraphics2.setColor(-8967919);
-                mGraphics2.fillRect(this.xDia + n2 - n2 / 4 + 5, this.yDia + 7 + i * this.h, this.wDia - n2, 14, false);
-                mGraphics2.setColor(-526425);
-                mGraphics2.fillRect(this.xDia + n2 - n2 / 4 + 5 + 1, this.yDia + 7 + i * this.h + 1, this.wDia - n2 - 2, 12, false);
-                mGraphics2.setColor(-8952235);
-                mGraphics2.fillRect(this.xDia + n2 - n2 / 4 + 5 + 2, this.yDia + 7 + i * this.h + 2, this.wDia - n2 - 4, 10, false);
+                g.setColor(-8967919);
+                g.fillRect(this.xDia + n2 - n2 / 4 + 5, this.yDia + 7 + i * this.h, this.wDia - n2, 14, false);
+                g.setColor(-526425);
+                g.fillRect(this.xDia + n2 - n2 / 4 + 5 + 1, this.yDia + 7 + i * this.h + 1, this.wDia - n2 - 2, 12, false);
+                g.setColor(-8952235);
+                g.fillRect(this.xDia + n2 - n2 / 4 + 5 + 2, this.yDia + 7 + i * this.h + 2, this.wDia - n2 - 4, 10, false);
                 if (this.percenTime <= 15) {
                     this.indexcolor = GameCanvas.gameTick % 2 == 0 ? (byte)3 : (byte)4;
                 }
-                mGraphics2.setColor(this.color[this.indexcolor]);
+                g.setColor(this.color[this.indexcolor]);
                 if (this.percenTime > 0) {
-                    mGraphics2.fillRect(this.xDia + n2 - n2 / 4 + 5 + 3, this.yDia + 7 + i * this.h + 3, n - 6, 8, false);
+                    g.fillRect(this.xDia + n2 - n2 / 4 + 5 + 3, this.yDia + 7 + i * this.h + 3, n - 6, 8, false);
                 }
-                mFont.tahoma_7b_black.drawString(mGraphics2, GameScreen.converSecon2minutes((int)this.currTime), this.xDia + n2 - n2 / 4 + 5 + 2 + (this.wDia - n2 - 4) / 2, this.yDia + 7 + i * this.h + 1, 2, false);
+                mFont.tahoma_7b_black.drawString(g, GameScreen.converSecon2minutes((int)this.currTime), this.xDia + n2 - n2 / 4 + 5 + 2 + (this.wDia - n2 - 4) / 2, this.yDia + 7 + i * this.h + 1, 2, false);
             }
             if (i != 2) continue;
             n = 0;
@@ -95,17 +95,17 @@ extends MainDialog {
             if (this.percenWin <= 0) {
                 n = 0;
             }
-            mGraphics2.setColor(-8967919);
-            mGraphics2.fillRect(this.xDia + n2 - n2 / 4 + 5, this.yDia + 7 + i * this.h, this.wDia - n2, 14, false);
-            mGraphics2.setColor(-526425);
-            mGraphics2.fillRect(this.xDia + n2 - n2 / 4 + 5 + 1, this.yDia + 7 + i * this.h + 1, this.wDia - n2 - 2, 12, false);
-            mGraphics2.setColor(-8952235);
-            mGraphics2.fillRect(this.xDia + n2 - n2 / 4 + 5 + 2, this.yDia + 7 + i * this.h + 2, this.wDia - n2 - 4, 10, false);
-            mGraphics2.setColor(this.color[this.indexcolorpercen]);
-            mGraphics2.fillRect(this.xDia + n2 - n2 / 4 + 5 + 3, this.yDia + 7 + i * this.h + 3, n - 6, 8, false);
-            mFont.tahoma_7b_black.drawString(mGraphics2, this.texpercen, this.xDia + n2 - n2 / 4 + 5 + 2 + (this.wDia - n2 - 4) / 2, this.yDia + 7 + i * this.h + 1, 2, false);
+            g.setColor(-8967919);
+            g.fillRect(this.xDia + n2 - n2 / 4 + 5, this.yDia + 7 + i * this.h, this.wDia - n2, 14, false);
+            g.setColor(-526425);
+            g.fillRect(this.xDia + n2 - n2 / 4 + 5 + 1, this.yDia + 7 + i * this.h + 1, this.wDia - n2 - 2, 12, false);
+            g.setColor(-8952235);
+            g.fillRect(this.xDia + n2 - n2 / 4 + 5 + 2, this.yDia + 7 + i * this.h + 2, this.wDia - n2 - 4, 10, false);
+            g.setColor(this.color[this.indexcolorpercen]);
+            g.fillRect(this.xDia + n2 - n2 / 4 + 5 + 3, this.yDia + 7 + i * this.h + 3, n - 6, 8, false);
+            mFont.tahoma_7b_black.drawString(g, this.texpercen, this.xDia + n2 - n2 / 4 + 5 + 2 + (this.wDia - n2 - 4) / 2, this.yDia + 7 + i * this.h + 1, 2, false);
         }
-        this.cmdClose.paint(mGraphics2, GameCanvas.hw, this.yDia + this.hDia - iCommand.hButtonCmd);
+        this.cmdClose.paint(g, GameCanvas.hw, this.yDia + this.hDia - iCommand.hButtonCmd);
     }
 
     public void update() {

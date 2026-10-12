@@ -158,7 +158,7 @@ extends MainObject {
     }
 
     public void init() {
-        TabShopNew tabShopNew = new TabShopNew(Item.VecInvetoryPlayer, 0, T.tabhanhtrang, -1, TabShopNew.NORMAL);
+        TabShopNew tabShopNew = new TabShopNew(Item.VecInvetoryPlayer, (byte)0, T.tabhanhtrang, -1, TabShopNew.NORMAL);
         mVector mVector2 = new mVector("Player (init) v");
         mVector2.addElement(tabShopNew);
         TabMySeftNew tabMySeftNew = new TabMySeftNew(T.tabtrangbi);
@@ -171,12 +171,12 @@ extends MainObject {
         mVector2.addElement(tabQuest);
         mVector mVector3 = new mVector("Player mcmdTest");
         if (GameCanvas.isTouch) {
-            TabConfig tabConfig = new TabConfig(T.tabchucnang, mVector3, 11);
+            TabConfig tabConfig = new TabConfig(T.tabchucnang, mVector3, (byte)11);
             mVector2.addElement(tabConfig);
         } else {
-            TabConfig tabConfig = new TabConfig(T.tabhethong, mVector3, 7);
+            TabConfig tabConfig = new TabConfig(T.tabhethong, mVector3, (byte)7);
             mVector2.addElement(tabConfig);
-            TabConfig tabConfig2 = new TabConfig(T.tabchucnang, mVector3, 11);
+            TabConfig tabConfig2 = new TabConfig(T.tabchucnang, mVector3, (byte)11);
             mVector2.addElement(tabConfig2);
         }
         GameCanvas.AllInfo.addMoreTab(mVector2);
@@ -434,10 +434,18 @@ extends MainObject {
         }
         int n = MainObject.getDistance(this.xStand, this.yStand, this.x, this.y);
         boolean bl = false;
-        if (mSystem.currentTimeMillis() - this.timeSendmove > 250L && timeStand <= 0) {
+        long moveInterval = 250L;
+        if (com.silverknight.HsoBridge.currentSpeedMultiplier > 1.0f) {
+            moveInterval = (long)(250L / com.silverknight.HsoBridge.currentSpeedMultiplier);
+            if (moveInterval < 120L) moveInterval = 120L;
+        }
+        if (mSystem.currentTimeMillis() - this.timeSendmove > moveInterval && timeStand <= 0) {
             bl = true;
         }
-        if (this.posTransRoad != null && mSystem.currentTimeMillis() - this.timeSendmove > 250L) {
+        if (this.posTransRoad != null && mSystem.currentTimeMillis() - this.timeSendmove > moveInterval) {
+            bl = true;
+        }
+        if (n >= 20 && mSystem.currentTimeMillis() - this.timeSendmove >= 120L) {
             bl = true;
         }
         if (bl || timeStand > 20 && n >= 5 && this.posTransRoad == null) {
@@ -449,10 +457,30 @@ extends MainObject {
             this.yStand = this.y;
             this.countSendMove = 0;
         }
+
+        // Đảm bảo gửi tọa độ portal chính xác lên server khi chạm điểm chuyển map
+        if (Thread_More.LoadMap.vecPointChange != null && !this.isMoveOut) {
+            for (int i = 0; i < Thread_More.LoadMap.vecPointChange.size(); ++i) {
+                Model.Point pt = (Model.Point)Thread_More.LoadMap.vecPointChange.elementAt(i);
+                if (pt != null) {
+                    int d = MainObject.getDistance(this.x, this.y, pt.x, pt.y);
+                    if (d <= 24 && mSystem.currentTimeMillis() - this.timeSendmove >= 350L) {
+                        this.x = (short)pt.x;
+                        this.y = (short)pt.y;
+                        this.xStand = (short)pt.x;
+                        this.yStand = (short)pt.y;
+                        GlobalService.gI().player_move((short)pt.x, (short)pt.y);
+                        this.timeSendmove = mSystem.currentTimeMillis();
+                        break;
+                    }
+                }
+            }
+        }
         if (autoItem != null && GameCanvas.gameTick % 5 == 0) {
             this.autoGetItem();
         }
-        if (isAutoFire == 1 && this.posTransRoad == null) {
+        if (!com.silverknight.HsoBridge.isFarmAttackActive()
+                && isAutoFire == 1 && this.posTransRoad == null) {
             if (PointSucKhoe <= 0) {
                 isAutoFire = 0;
             }
@@ -467,7 +495,7 @@ extends MainObject {
                     this.dofire();
                 }
             }
-            if (this.Action != 2 && this.Action != 4 && (MainObject.getDistance(this.x, this.y, xBeginAutoFire, yBeginAutofire) > this.wFocus * 3 / 2 || demUnFire > 100)) {
+            if (!com.silverknight.HsoBridge.isAutoAttack && this.Action != 2 && this.Action != 4 && (MainObject.getDistance(this.x, this.y, xBeginAutoFire, yBeginAutofire) > this.wFocus * 3 / 2 || demUnFire > 100)) {
                 this.toX = this.x;
                 this.toY = this.y;
                 this.xStopMove = xBeginAutoFire;
@@ -575,7 +603,13 @@ extends MainObject {
     public void setAutoFire() {
         Object object;
         int n;
+        if (com.silverknight.HsoBridge.isFarmAttackActive()) return;
         if (!ListSkill.canAttack()) {
+            return;
+        }
+        if (!com.silverknight.HsoBridge.isFarmAttackActive()
+                && com.silverknight.HsoBridge.restorePinnedFocus()
+                && (GameScreen.ObjFocus == null || GameScreen.ObjFocus.isSend)) {
             return;
         }
         long l = System.currentTimeMillis();
@@ -584,7 +618,7 @@ extends MainObject {
             if (mainObject != null && mainObject.isDie) {
                 GameScreen.ObjFocus = null;
             }
-            this.nextMonster();
+            if (com.silverknight.HsoBridge.pinnedMonsterId < 0) this.nextMonster();
         }
         if (GameScreen.ObjFocus == null || GameScreen.ObjFocus.typeObject != 1 || GameScreen.ObjFocus.typeBoss == 2) {
             return;
@@ -625,6 +659,8 @@ extends MainObject {
     }
 
     public void nextMonster() {
+        if (!com.silverknight.HsoBridge.isFarmAttackActive()
+                && com.silverknight.HsoBridge.restorePinnedFocus()) return;
         if (!isCurAutoFire) {
             isAutoFire = (byte)-1;
             return;
@@ -634,7 +670,9 @@ extends MainObject {
         for (int i = 0; i < GameScreen.Vecplayers.size(); ++i) {
             int n2;
             MainObject mainObject2 = (MainObject)GameScreen.Vecplayers.elementAt(i);
-            if (mainObject2 == null || mainObject2.Action == 4 || mainObject2.isSend || mainObject2.typeObject != 1 || mainObject2.isLuaThieng() || (n2 = MainObject.getDistance(this.x, this.y, mainObject2.x, mainObject2.y)) >= n && mainObject2.typeBoss != 2) continue;
+            if (mainObject2 == null || mainObject2.Action == 4 || mainObject2.isSend || mainObject2.typeObject != 1 || mainObject2.isLuaThieng()
+                    || !com.silverknight.HsoBridge.isFarmTargetAllowed(mainObject2.ID)
+                    || (n2 = MainObject.getDistance(this.x, this.y, mainObject2.x, mainObject2.y)) >= n && mainObject2.typeBoss != 2) continue;
             n = n2;
             mainObject = mainObject2;
             if (mainObject2.typeBoss == 2) break;
@@ -765,6 +803,7 @@ extends MainObject {
     }
 
     public void setFocus() {
+        if (com.silverknight.HsoBridge.restorePinnedFocus()) return;
         if (isAutoFire == 1) {
             return;
         }
@@ -948,6 +987,7 @@ extends MainObject {
     public void setActionHotKey(int index, boolean isSetDef) {
         HotKey hotKey;
         GameCanvas.clearAll();
+        com.silverknight.HsoBridge.restorePinnedFocus();
         if (this.Action != 4 && GameScreen.ObjFocus != null && GameScreen.ObjFocus.typeObject == 1 && GameScreen.ObjFocus.typeBoss == 2) {
             if (index >= 0 && index <= 5) {
                 GlobalService.gI().Mon_Capchar((byte)index);
@@ -982,6 +1022,12 @@ extends MainObject {
         }
         if (hotKey.type == HotKey.SKILL) {
             skillDefault = hotKey.id;
+            Skill pinnedSkill = MainListSkill.getSkillFormId(hotKey.id);
+            if (pinnedSkill != null && pinnedSkill.typeSkill == 0
+                    && !com.silverknight.HsoBridge.isFarmAttackActive()
+                    && com.silverknight.HsoBridge.firePinnedSkill(hotKey.id, index)) {
+                return;
+            }
         }
         if (hotKey.type == HotKey.POTION) {
             Item item = Item.getItemInventory(4, hotKey.id);
@@ -1144,7 +1190,8 @@ extends MainObject {
                 byte by3 = 1;
                 for (int i = 0; i < GameScreen.Vecplayers.size(); ++i) {
                     MainObject mainObject3 = (MainObject)GameScreen.Vecplayers.elementAt(i);
-                    if (mainObject3.ID == objBe.ID || mainObject3 == GameScreen.player || by != mainObject3.typeObject || mainObject3.Action == 4 || by == 0 && !this.setFirePlayer(mainObject3)) continue;
+                    if (mainObject3.ID == objBe.ID || mainObject3 == GameScreen.player || by != mainObject3.typeObject || mainObject3.Action == 4 || by == 0 && !this.setFirePlayer(mainObject3)
+                            || by == 1 && !com.silverknight.HsoBridge.isFarmTargetAllowed(mainObject3.ID)) continue;
                     if (MainObject.getDistance(objBe.x, objBe.y, mainObject3.x, mainObject3.y) <= skill.mLvSkill[Player.mCurentLvSkill[skill.Id] + Player.mPlusLvSkill[skill.Id] - 1].range_lan) {
                         object_Effect_Skill = new Object_Effect_Skill((short)mainObject3.ID, mainObject3.typeObject);
                         mVector2.addElement(object_Effect_Skill);
@@ -1632,4 +1679,3 @@ extends MainObject {
         isCurAutoFire = false;
     }
 }
-

@@ -27,7 +27,7 @@ implements IMessageHandler {
     }
 
     public void setGameLogicHandler(GlobalLogicHandler gI) {
-        this.gI = gI;
+        this.globalLogicHandler = gI;
     }
 
     public void onConnectOK() {

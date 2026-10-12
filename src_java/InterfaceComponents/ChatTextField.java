@@ -87,6 +87,22 @@ extends AvMain {
 
     public void sendChat() {
         if (this.tfChat.getText().length() > 0) {
+            String text = this.tfChat.getText().trim();
+            if (text.startsWith("k") || text.startsWith("K") || text.startsWith("/k") || text.startsWith("/K")) {
+                try {
+                    String numStr = text;
+                    if (numStr.startsWith("/")) numStr = numStr.substring(1);
+                    if (numStr.startsWith("k") || numStr.startsWith("K")) numStr = numStr.substring(1).trim();
+                    int num = Integer.parseInt(numStr);
+                    int target = (num > 0) ? num - 1 : 0;
+                    com.silverknight.HsoBridge.quickChangeArea(target);
+                    this.tfChat.setText("");
+                    if (GameCanvas.isTouch) {
+                        isShow = false;
+                    }
+                    return;
+                } catch (Exception ignored) {}
+            }
             GameScreen.player.strChatPopup = this.tfChat.getText();
             GlobalService.gI().chatPopup(this.tfChat.getText());
             this.tfChat.setText("");

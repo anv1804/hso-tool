@@ -28,11 +28,11 @@ public class CharCountDown {
         int n3 = 0;
         long l = this.maxTime - mSystem.currentTimeMillis();
         n3 = (int)(60L - l * (long)this.w / (long)this.timeper);
-        mGraphics2.drawRegion(AvMain.imgcolorhpmp_back, 0, 0, 62, 9, 0, n, n2, 0, false);
-        mGraphics2.drawRegion(AvMain.imgcolorhpmp, 0, 7, n3, 7, 0, n + 1, n2 + 1, 0, false);
-        mFont.tahoma_7_black.drawString(mGraphics2, this.tile, n + this.w / 2 + 1, n2 - 10 + 1 - 3, 2, false);
-        mFont.tahoma_7_white.drawString(mGraphics2, this.tile, n + this.w / 2, n2 - 10 - 3, 2, false);
-        mFont.tahoma_7b_white.drawString(mGraphics2, "" + this.per + "%", n + this.w / 2, n2 - 1, 2, false);
+        g.drawRegion(AvMain.imgcolorhpmp_back, 0, 0, 62, 9, 0, n, n2, 0, false);
+        g.drawRegion(AvMain.imgcolorhpmp, 0, 7, n3, 7, 0, n + 1, n2 + 1, 0, false);
+        mFont.tahoma_7_black.drawString(g, this.tile, n + this.w / 2 + 1, n2 - 10 + 1 - 3, 2, false);
+        mFont.tahoma_7_white.drawString(g, this.tile, n + this.w / 2, n2 - 10 - 3, 2, false);
+        mFont.tahoma_7b_white.drawString(g, "" + this.per + "%", n + this.w / 2, n2 - 1, 2, false);
     }
 
     public void update() {

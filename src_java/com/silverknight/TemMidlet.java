@@ -83,7 +83,7 @@ extends MIDlet {
     public static byte[] encoding(byte[] array) {
         if (array != null) {
             for (int i = 0; i < array.length; ++i) {
-                array[i] = ~array[i];
+                array[i] = (byte)(~array[i]);
             }
         }
         return array;
@@ -115,8 +115,8 @@ extends MIDlet {
 
     public static void openUrl(String url) {
         try {
-            instance.platformRequest(url);
-            instance.notifyDestroyed();
+            // Bỏ gọi notifyDestroyed() để tránh bị văng game ra launcher MicroEmulator
+            mSystem.println("Open URL: " + url);
         }
         catch (Exception exception) {
             exception.printStackTrace();

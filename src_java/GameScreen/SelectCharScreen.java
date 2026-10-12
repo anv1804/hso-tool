@@ -89,7 +89,7 @@ extends MainScreen {
             case 1: {
                 GameCanvas.login.Show();
                 Session_ME.gI().close();
-                GameScreen.player = new Player(0, 0, "unname", 0, 0);
+                GameScreen.player = new Player(0, (byte)0, "unname", 0, 0);
             }
         }
         super.commandTab(index, sub);

@@ -262,6 +262,17 @@ extends MainObject {
         return null;
     }
 
+    public static String getCatalogyNameByStats(int lv, int maxHp) {
+        String name = null;
+        for (int i = 0; i < VecCatalogyMonSter.size(); ++i) {
+            CatalogyMonster catalogyMonster = (CatalogyMonster)VecCatalogyMonSter.elementAt(i);
+            if (catalogyMonster.lv != lv || catalogyMonster.maxHp != maxHp) continue;
+            if (name != null && !name.equals(catalogyMonster.name)) return null;
+            name = catalogyMonster.name;
+        }
+        return name;
+    }
+
     public void auto_Move() {
         if (this.typeBoss == 5) {
             return;
@@ -661,4 +672,3 @@ extends MainObject {
         return this.typeMonster == 17 || this.typeMonster == 19 || this.typeMonster == 18;
     }
 }
-

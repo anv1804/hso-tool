@@ -71,6 +71,21 @@ public class ChatDetail {
             string2 = this.tfchat.getText();
         }
         if (string2.length() > 0) {
+            String text = string2.trim();
+            if (text.startsWith("k") || text.startsWith("K") || text.startsWith("/k") || text.startsWith("/K")) {
+                try {
+                    String numStr = text;
+                    if (numStr.startsWith("/")) numStr = numStr.substring(1);
+                    if (numStr.startsWith("k") || numStr.startsWith("K")) numStr = numStr.substring(1).trim();
+                    int num = Integer.parseInt(numStr);
+                    int target = (num > 0) ? num - 1 : 0;
+                    com.silverknight.HsoBridge.quickChangeArea(target);
+                    if (this.tfchat != null) {
+                        this.tfchat.setText("");
+                    }
+                    return;
+                } catch (Exception ignored) {}
+            }
             String[] stringArray = mFont.tahoma_7_white.splitFontArray(GameScreen.player.name + ": " + string2, GameCanvas.msgchat.wDia - GameCanvas.msgchat.wOne5 * 2 - 8);
             MainTextChat[] mainTextChatArray = this.addChatNew(stringArray, this.setColorText(nametext));
             if (mainTextChatArray != null) {

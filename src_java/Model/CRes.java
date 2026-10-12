@@ -448,83 +448,66 @@ public class CRes {
         return charPartInfo[type][id];
     }
 
-    public static void getImgWeaPone(int claz, int i, int j) {
-        block18: {
-            try {
-                InputStream inputStream;
-                Object object;
-                Object object2;
-                MainObject.imgWeapone[claz][i][j] = new WeaponInfo();
-                if (mSystem.isImgLocal) {
-                    object2 = new String[]{"kiem/", "songkiem/", "phapsu/", "sung/"};
-                    object = null;
+    public static void getImgWeaPone(int claz, int idx1, int idx2) {
+        try {
+            MainObject.imgWeapone[claz][idx1][idx2] = new WeaponInfo();
+            int a, b;
+            if (mSystem.isImgLocal) {
+                String[] paths = new String[]{"kiem/", "songkiem/", "phapsu/", "sung/"};
+                mImage img = null;
+                try {
+                    img = mImage.createImage("/weapon/" + paths[claz] + idx1 + ".img");
+                } catch (Exception e) {}
+                if (img != null && img.image != null) {
+                    DataInputStream dis = null;
                     try {
-                        object = mImage.createImage("/weapon/" + object2[claz] + i + ".img");
-                    }
-                    catch (Exception exception) {
-                        // empty catch block
-                    }
-                    if (object != null && ((mImage)object).image != null) {
-                        inputStream = null;
-                        try {
-                            inputStream = mImage.openFile("/weapon/" + object2[claz] + i + "_data");
-                        }
-                        catch (Exception exception) {
-                            // empty catch block
-                        }
-                        if (inputStream != null) {
-                            MainObject.imgWeapone[claz][i][j].img = object;
-                            for (int i = 0; i < 4; ++i) {
-                                for (int j = 0; j < 3; ++j) {
-                                    MainObject.imgWeapone[claz][i][j].mPos[i][j][0] = (byte)inputStream.read();
-                                    MainObject.imgWeapone[claz][i][j].mPos[i][j][1] = (byte)inputStream.read();
-                                }
-                                MainObject.imgWeapone[claz][i][j].mRegion[i][0] = (byte)inputStream.read();
-                                MainObject.imgWeapone[claz][i][j].mRegion[i][1] = (byte)inputStream.read();
+                        dis = mImage.openFile("/weapon/" + paths[claz] + idx1 + "_data");
+                    } catch (Exception e) {}
+                    if (dis != null) {
+                        MainObject.imgWeapone[claz][idx1][idx2].img = img;
+                        for (a = 0; a < 4; ++a) {
+                            for (b = 0; b < 3; ++b) {
+                                MainObject.imgWeapone[claz][idx1][idx2].mPos[a][b][0] = (byte)dis.read();
+                                MainObject.imgWeapone[claz][idx1][idx2].mPos[a][b][1] = (byte)dis.read();
                             }
-                            MainObject.imgWeapone[claz][i][j].himg = mImage.getImageHeight(MainObject.imgWeapone[claz][i][j].img.image);
-                            return;
+                            MainObject.imgWeapone[claz][idx1][idx2].mRegion[a][0] = (byte)dis.read();
+                            MainObject.imgWeapone[claz][idx1][idx2].mRegion[a][1] = (byte)dis.read();
                         }
+                        MainObject.imgWeapone[claz][idx1][idx2].himg = mImage.getImageHeight(MainObject.imgWeapone[claz][idx1][idx2].img.image);
+                        return;
                     }
-                }
-                if ((object2 = (String[])hashWeapon.get(claz + "_" + i)) == null) {
-                    object2 = new MainImageDataPartChar();
-                    hashWeapon.put(claz + "_" + i, object2);
-                    object2.timeImageNull = GameCanvas.timeNow;
-                    CRes.getFromRms((byte)claz, (short)i);
-                    MainObject.imgWeapone[claz][i][j] = null;
-                    break block18;
-                }
-                if (object2.img != null) {
-                    MainObject.imgWeapone[claz][i][j].img = object2.img;
-                    inputStream = new ByteArrayInputStream(object2.isData);
-                    object = new DataInputStream(inputStream);
-                    FilePack.reset();
-                    try {
-                        for (int i = 0; i < 4; ++i) {
-                            for (int j = 0; j < 3; ++j) {
-                                MainObject.imgWeapone[claz][i][j].mPos[i][j][0] = (byte)((InputStream)object).read();
-                                MainObject.imgWeapone[claz][i][j].mPos[i][j][1] = (byte)((InputStream)object).read();
-                            }
-                            MainObject.imgWeapone[claz][i][j].mRegion[i][0] = (byte)((InputStream)object).read();
-                            MainObject.imgWeapone[claz][i][j].mRegion[i][1] = (byte)((InputStream)object).read();
-                        }
-                        MainObject.imgWeapone[claz][i][j].himg = mImage.getImageHeight(MainObject.imgWeapone[claz][i][j].img.image);
-                    }
-                    catch (Exception exception) {
-                        // empty catch block
-                    }
-                    hashWeapon.remove(object2);
-                    break block18;
-                }
-                if ((GameCanvas.timeNow - object2.timeImageNull) / 1000L >= 15L) {
-                    CRes.getFromRms((byte)claz, (short)i);
                 }
             }
-            catch (Exception exception) {
-                exception.printStackTrace();
-                mSystem.println("loi Cres 7");
+            MainImageDataPartChar dataPartChar = (MainImageDataPartChar)hashWeapon.get(claz + "_" + idx1);
+            if (dataPartChar == null) {
+                dataPartChar = new MainImageDataPartChar();
+                hashWeapon.put(claz + "_" + idx1, dataPartChar);
+                dataPartChar.timeImageNull = GameCanvas.timeNow;
+                CRes.getFromRms((byte)claz, (short)idx1);
+                MainObject.imgWeapone[claz][idx1][idx2] = null;
+            } else if (dataPartChar.img != null) {
+                MainObject.imgWeapone[claz][idx1][idx2].img = dataPartChar.img;
+                ByteArrayInputStream bais = new ByteArrayInputStream(dataPartChar.isData);
+                DataInputStream dis = new DataInputStream(bais);
+                FilePack.reset();
+                try {
+                    for (a = 0; a < 4; ++a) {
+                        for (b = 0; b < 3; ++b) {
+                            MainObject.imgWeapone[claz][idx1][idx2].mPos[a][b][0] = (byte)dis.read();
+                            MainObject.imgWeapone[claz][idx1][idx2].mPos[a][b][1] = (byte)dis.read();
+                        }
+                        MainObject.imgWeapone[claz][idx1][idx2].mRegion[a][0] = (byte)dis.read();
+                        MainObject.imgWeapone[claz][idx1][idx2].mRegion[a][1] = (byte)dis.read();
+                    }
+                    MainObject.imgWeapone[claz][idx1][idx2].himg = mImage.getImageHeight(MainObject.imgWeapone[claz][idx1][idx2].img.image);
+                } catch (Exception e) {}
+                hashWeapon.remove(dataPartChar);
+            } else if ((GameCanvas.timeNow - dataPartChar.timeImageNull) / 1000L >= 15L) {
+                CRes.getFromRms((byte)claz, (short)idx1);
             }
+        } catch (Exception e) {
+            e.printStackTrace();
+            mSystem.println("loi Cres 7");
         }
         FilePack.reset();
     }
@@ -537,32 +520,31 @@ public class CRes {
         GlobalService.gI().load_image_data_part_char((byte)(type + 50), id);
     }
 
-    public static WPSplashInfo GetWPSplashInfo(int claz, int i, int j) {
+    public static WPSplashInfo GetWPSplashInfo(int claz, int idx1, int idx2) {
         try {
             String[] stringArray = new String[]{"kiem/", "songkiem/", "phapsu/", "sung/"};
-            CRes.wpSplashInfos[claz][i][j] = new WPSplashInfo();
-            CRes.wpSplashInfos[claz][i][j].image = mImage.createImage("/wps/" + stringArray[claz] + i + ".img");
-            DataInputStream dataInputStream = mImage.openFile("/wps/" + stringArray[claz] + i + "_data");
+            CRes.wpSplashInfos[claz][idx1][idx2] = new WPSplashInfo();
+            CRes.wpSplashInfos[claz][idx1][idx2].image = mImage.createImage("/wps/" + stringArray[claz] + idx1 + ".img");
+            DataInputStream dataInputStream = mImage.openFile("/wps/" + stringArray[claz] + idx1 + "_data");
             if (dataInputStream != null) {
-                for (int i = 0; i < 4; ++i) {
-                    for (int j = 0; j < 8; ++j) {
-                        CRes.wpSplashInfos[claz][i][j].P0_X[i][j] = ((InputStream)dataInputStream).read();
-                        CRes.wpSplashInfos[claz][i][j].P0_Y[i][j] = ((InputStream)dataInputStream).read();
-                        CRes.wpSplashInfos[claz][i][j].PF_X[i][j] = CRes.readSignByte(dataInputStream);
-                        CRes.wpSplashInfos[claz][i][j].PF_Y[i][j] = CRes.readSignByte(dataInputStream);
-                        CRes.wpSplashInfos[claz][i][j].PF_W[i][j] = ((InputStream)dataInputStream).read();
-                        CRes.wpSplashInfos[claz][i][j].PF_H[i][j] = ((InputStream)dataInputStream).read();
+                for (int a = 0; a < 4; ++a) {
+                    for (int b = 0; b < 8; ++b) {
+                        CRes.wpSplashInfos[claz][idx1][idx2].P0_X[a][b] = dataInputStream.read();
+                        CRes.wpSplashInfos[claz][idx1][idx2].P0_Y[a][b] = dataInputStream.read();
+                        CRes.wpSplashInfos[claz][idx1][idx2].PF_X[a][b] = CRes.readSignByte(dataInputStream);
+                        CRes.wpSplashInfos[claz][idx1][idx2].PF_Y[a][b] = CRes.readSignByte(dataInputStream);
+                        CRes.wpSplashInfos[claz][idx1][idx2].PF_W[a][b] = dataInputStream.read();
+                        CRes.wpSplashInfos[claz][idx1][idx2].PF_H[a][b] = dataInputStream.read();
                     }
                 }
             }
             FilePack.reset();
-        }
-        catch (IOException iOException) {
-            CRes.wpSplashInfos[claz][i][j] = null;
+        } catch (IOException e) {
+            CRes.wpSplashInfos[claz][idx1][idx2] = null;
             mSystem.println("loi Cres 8");
-            iOException.printStackTrace();
+            e.printStackTrace();
         }
-        return wpSplashInfos[claz][i][j];
+        return wpSplashInfos[claz][idx1][idx2];
     }
 
     public static WeaponInfo loadImgWeaPone(int i, int j, int index) {
@@ -582,7 +564,7 @@ public class CRes {
     public static byte[] encoding(byte[] array) {
         if (array != null) {
             for (int i = 0; i < array.length; ++i) {
-                array[i] = ~array[i];
+                array[i] = (byte)~array[i];
             }
         }
         return array;

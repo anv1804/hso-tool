@@ -215,7 +215,7 @@ extends MainTabNew {
                 GameScreen.player.resetAction();
                 Session_ME.gI().close();
                 GameCanvas.login.Show();
-                GameScreen.player = new Player(0, 0, "unname", 0, 0);
+                GameScreen.player = new Player(0, (byte)0, "unname", 0, 0);
                 GlobalLogicHandler.timeReconnect = 0L;
                 GlobalLogicHandler.isMelogin = false;
                 GlobalLogicHandler.isDisConect = false;

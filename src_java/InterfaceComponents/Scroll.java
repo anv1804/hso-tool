@@ -163,7 +163,7 @@ public class Scroll {
         }
         ScrollResult scrollResult = new ScrollResult();
         scrollResult.selected = this.selectedItem;
-        scrollResult.isFinish = n2;
+        scrollResult.isFinish = (n2 != 0);
         scrollResult.isDowning = this.pointerIsDowning;
         return scrollResult;
     }
@@ -242,7 +242,7 @@ public class Scroll {
         }
         ScrollResult scrollResult = new ScrollResult();
         scrollResult.selected = this.selectedItem;
-        scrollResult.isFinish = n2;
+        scrollResult.isFinish = (n2 != 0);
         scrollResult.isDowning = this.pointerIsDowning;
         return scrollResult;
     }

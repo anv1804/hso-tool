@@ -228,7 +228,7 @@ extends MainTabNew {
                     GameCanvas.start_Pet_Info((PetItem)item, (byte)1);
                 }
                 mVector mVector2 = new mVector("TabMySeftNew vecItemMenu");
-                TabShopNew tabShopNew = new TabShopNew(Item.VecInvetoryPlayer, 0, T.choan, -1, TabShopNew.INVEN_FOOD_PET);
+                TabShopNew tabShopNew = new TabShopNew(Item.VecInvetoryPlayer, (byte)0, T.choan, -1, TabShopNew.INVEN_FOOD_PET);
                 tabShopNew.petCur = MsgDialog.pet;
                 mVector2.addElement(tabShopNew);
                 GameCanvas.foodPet = new TabScreenNew();

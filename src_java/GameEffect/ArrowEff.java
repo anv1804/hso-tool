@@ -82,8 +82,8 @@ extends MainEffect {
     }
 
     public void paint(mGraphics g) {
-        this.arrow.paintTopArrow(mGraphics2, this.x, this.y);
-        this.arrow.paintBottomArrow(mGraphics2, this.x, this.y);
+        this.arrow.paintTopArrow(g, this.x, this.y);
+        this.arrow.paintBottomArrow(g, this.x, this.y);
     }
 
     public void update() {

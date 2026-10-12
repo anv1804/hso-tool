@@ -108,52 +108,52 @@ extends MainTabNew {
 
     public void paint(mGraphics g) {
         int n;
-        mFont.tahoma_7_white.drawString(mGraphics2, T.diemkynang + Player.diemKyNang, this.xBegin + 2, this.yBegin + 3, 0, true);
+        mFont.tahoma_7_white.drawString(g, T.diemkynang + Player.diemKyNang, this.xBegin + 2, this.yBegin + 3, 0, true);
         if ((!GameCanvas.menu2.isShowMenu && GameCanvas.currentDialog == null || MainTabNew.longwidth > 0) && MainTabNew.timePaintInfo > MainTabNew.timeRequest && this.vecListCmd != null) {
             for (n = 0; n < this.vecListCmd.size(); ++n) {
                 iCommand iCommand2 = (iCommand)this.vecListCmd.elementAt(n);
-                iCommand2.paint(mGraphics2, iCommand2.xCmd, iCommand2.yCmd);
+                iCommand2.paint(g, iCommand2.xCmd, iCommand2.yCmd);
             }
         }
-        mGraphics2.setClip(this.xBegin, this.yBegin + GameCanvas.hText + 2, MainTabNew.wblack, MainTabNew.hblack - 2 - GameCanvas.hText);
-        mGraphics2.saveCanvas();
-        mGraphics2.ClipRec(this.xBegin, this.yBegin + GameCanvas.hText + 2, MainTabNew.wblack, MainTabNew.hblack - 2 - GameCanvas.hText);
-        mGraphics2.translate(0, -MainScreen.cameraSub.yCam);
+        g.setClip(this.xBegin, this.yBegin + GameCanvas.hText + 2, MainTabNew.wblack, MainTabNew.hblack - 2 - GameCanvas.hText);
+        g.saveCanvas();
+        g.ClipRec(this.xBegin, this.yBegin + GameCanvas.hText + 2, MainTabNew.wblack, MainTabNew.hblack - 2 - GameCanvas.hText);
+        g.translate(0, -MainScreen.cameraSub.yCam);
         n = this.MaxItem;
         for (int i = 0; i < n; ++i) {
-            this.paintLine(mGraphics2, i);
-            mGraphics2.setColor(-8688548);
-            mGraphics2.fillRect(XYpaint[i][0] - this.sizeKill / 2 - 2 + 2, XYpaint[i][1] - 2 + 2, 22, 22, true);
+            this.paintLine(g, i);
+            g.setColor(-8688548);
+            g.fillRect(XYpaint[i][0] - this.sizeKill / 2 - 2 + 2, XYpaint[i][1] - 2 + 2, 22, 22, true);
             Item item = (Item)vecItem.elementAt(i);
             if (item != null) {
-                item.paintItem(mGraphics2, XYpaint[i][0] - this.sizeKill / 2 - 2 + 13, XYpaint[i][1] - 2 + 13, 22, 0, 0);
+                item.paintItem(g, XYpaint[i][0] - this.sizeKill / 2 - 2 + 13, XYpaint[i][1] - 2 + 13, 22, 0, 0);
             }
-            mGraphics2.drawImage(AvMain.imgHotKey, XYpaint[i][0] - this.sizeKill / 2 - 2 + 2, XYpaint[i][1] - 2 + 2, 0, true);
+            g.drawImage(AvMain.imgHotKey, XYpaint[i][0] - this.sizeKill / 2 - 2 + 2, XYpaint[i][1] - 2 + 2, 0, true);
             if (i != this.idSelect || MainTabNew.Focus != 1) continue;
-            mGraphics2.drawImage(AvMain.imgSelect_1, XYpaint[i][0] - this.sizeKill / 2 - 2, XYpaint[i][1] - 2, 0, true);
+            g.drawImage(AvMain.imgSelect_1, XYpaint[i][0] - this.sizeKill / 2 - 2, XYpaint[i][1] - 2, 0, true);
         }
-        mGraphics.resetTransAndroid(mGraphics2);
-        mGraphics2.restoreCanvas();
-        mGraphics2.endClip();
+        mGraphics.resetTransAndroid(g);
+        g.restoreCanvas();
+        g.endClip();
         if ((!GameCanvas.menu2.isShowMenu && GameCanvas.currentDialog == null || MainTabNew.longwidth > 0) && MainTabNew.timePaintInfo > MainTabNew.timeRequest) {
-            this.paintPopupContent(mGraphics2, false);
+            this.paintPopupContent(g, false);
         }
     }
 
     public void paintLine(mGraphics g, int n) {
-        mGraphics2.setColor(MainTabNew.color[6]);
+        g.setColor(MainTabNew.color[6]);
         if (this.stylePaint[n] == 0) {
-            mGraphics2.fillRect(XYpaint[n][0], XYpaint[n][1] + this.sizeKill, 1, this.hKill * 2 + this.sizeKill, true);
+            g.fillRect(XYpaint[n][0], XYpaint[n][1] + this.sizeKill, 1, this.hKill * 2 + this.sizeKill, true);
         } else if (this.stylePaint[n] == 1) {
-            mGraphics2.fillRect(XYpaint[n][0], XYpaint[n][1] + this.sizeKill, 1, this.sizeKill / 2, true);
-            mGraphics2.fillRect(XYpaint[n][0] - 2 * this.w8, XYpaint[n][1] + this.sizeKill + this.sizeKill / 2, this.w8 * 4 + 1, 1, true);
-            mGraphics2.fillRect(XYpaint[n][0] - 2 * this.w8, XYpaint[n][1] + this.sizeKill + this.sizeKill / 2 + 1, 1, this.sizeKill / 2, true);
-            mGraphics2.fillRect(XYpaint[n][0] + 2 * this.w8, XYpaint[n][1] + this.sizeKill + this.sizeKill / 2 + 1, 1, this.sizeKill / 2, true);
+            g.fillRect(XYpaint[n][0], XYpaint[n][1] + this.sizeKill, 1, this.sizeKill / 2, true);
+            g.fillRect(XYpaint[n][0] - 2 * this.w8, XYpaint[n][1] + this.sizeKill + this.sizeKill / 2, this.w8 * 4 + 1, 1, true);
+            g.fillRect(XYpaint[n][0] - 2 * this.w8, XYpaint[n][1] + this.sizeKill + this.sizeKill / 2 + 1, 1, this.sizeKill / 2, true);
+            g.fillRect(XYpaint[n][0] + 2 * this.w8, XYpaint[n][1] + this.sizeKill + this.sizeKill / 2 + 1, 1, this.sizeKill / 2, true);
         } else if (this.stylePaint[n] == 2) {
-            mGraphics2.fillRect(XYpaint[n][0], XYpaint[n][1] + this.sizeKill, 1, this.hKill / 2, true);
-            mGraphics2.fillRect(XYpaint[n][0] - this.w8, XYpaint[n][1] + this.sizeKill + this.hKill / 2, this.w8 * 2 + 1, 1, true);
-            mGraphics2.fillRect(XYpaint[n][0] - this.w8, XYpaint[n][1] + this.sizeKill + this.hKill / 2 + 1, 1, this.hKill / 2 + 4, true);
-            mGraphics2.fillRect(XYpaint[n][0] + this.w8, XYpaint[n][1] + this.sizeKill + this.hKill / 2 + 1, 1, this.hKill / 2 + 4, true);
+            g.fillRect(XYpaint[n][0], XYpaint[n][1] + this.sizeKill, 1, this.hKill / 2, true);
+            g.fillRect(XYpaint[n][0] - this.w8, XYpaint[n][1] + this.sizeKill + this.hKill / 2, this.w8 * 2 + 1, 1, true);
+            g.fillRect(XYpaint[n][0] - this.w8, XYpaint[n][1] + this.sizeKill + this.hKill / 2 + 1, 1, this.hKill / 2 + 4, true);
+            g.fillRect(XYpaint[n][0] + this.w8, XYpaint[n][1] + this.sizeKill + this.hKill / 2 + 1, 1, this.hKill / 2 + 4, true);
         }
     }
 

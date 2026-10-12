@@ -240,7 +240,7 @@ extends AvMain {
             byte by3 = msg.reader().readByte();
             byte by4 = msg.reader().readByte();
             if (GameScreen.player == null) {
-                GameScreen.player = new Player(s2, 0, string.toLowerCase(), 50, 50);
+                GameScreen.player = new Player(s2, (byte)0, string.toLowerCase(), 50, 50);
             }
             GameScreen.player.setInfo(by, by3, by4);
             byte by5 = msg.reader().readByte();
@@ -511,30 +511,17 @@ extends AvMain {
                         return;
                     }
                     if (mainObject == GameScreen.player) {
-                        if (CRes.abs(GameScreen.player.x - s3) > 24 || CRes.abs(GameScreen.player.y - s4) > 24) {
-                            Player.isLockKey = true;
-                            Player.isSendMove = false;
-                            GameScreen.player.toX = GameScreen.player.x;
-                            GameScreen.player.toY = GameScreen.player.y;
-                            GameScreen.player.xStopMove = s3;
-                            GameScreen.player.yStopMove = s4;
-                            try {
-                                GameScreen.player.posTransRoad = GameCanvas.game.updateFindRoad(s3 / LoadMap.wTile, s4 / LoadMap.wTile, GameScreen.player.x / LoadMap.wTile, GameScreen.player.y / LoadMap.wTile, 20);
-                            }
-                            catch (Exception exception) {
-                                mainObject.x = s3;
-                                mainObject.y = s4;
-                                GameScreen.player.posTransRoad = null;
-                                Player.isLockKey = false;
-                                Player.isSendMove = true;
-                            }
+                        int distServer = MainObject.getDistance(GameScreen.player.x, GameScreen.player.y, s3, s4);
+                        if (distServer > 48) {
+                            GameScreen.player.x = s3;
+                            GameScreen.player.y = s4;
+                            GameScreen.player.xStand = s3;
+                            GameScreen.player.yStand = s4;
+                            GameScreen.player.toX = s3;
+                            GameScreen.player.toY = s4;
+                            GameScreen.player.posTransRoad = null;
+                            GameScreen.player.resetMove();
                         }
-                        if (GameScreen.player.posTransRoad != null && GameScreen.player.posTransRoad.length < 20) continue;
-                        mainObject.x = s3;
-                        mainObject.y = s4;
-                        GameScreen.player.posTransRoad = null;
-                        Player.isLockKey = false;
-                        Player.isSendMove = true;
                         continue;
                     }
                     if (mainObject.typeObject == 1) {
@@ -739,7 +726,7 @@ extends AvMain {
             for (n3 = 0; n3 < n4; ++n3) {
                 int mainObject2;
                 n2 = msg.reader().readByte();
-                byArray[n2] = n = msg.reader().readByte();
+                byArray[n2] = (byte)(n = msg.reader().readByte());
                 int by = msg.reader().readByte();
                 for (mainObject2 = 0; mainObject2 < by; ++mainObject2) {
                     sArrayArray[n2][mainObject2] = msg.reader().readShort();
@@ -905,6 +892,7 @@ extends AvMain {
             int n4 = msg.reader().readInt();
             byte by = msg.reader().readByte();
             int n5 = msg.reader().readInt();
+            com.silverknight.HsoBridge.rememberMonsterInfo(s2, n2, s3, s4, n3, n4);
             MainMonster mainMonster = (MainMonster)MainObject.get_Object(s2, (byte)1);
             if (mainMonster == null || mainMonster.isRemove) {
                 return;
@@ -1195,7 +1183,7 @@ extends AvMain {
                         byte by4 = msg.reader().readByte();
                         s = msg.reader().readShort();
                         by2 = msg.reader().readByte();
-                        byArray[n2] = s3;
+                        byArray[n2] = (byte)s3;
                         by = msg.reader().readByte();
                         MainInfoItem[] by9 = new MainInfoItem[by];
                         for (by3 = 0; by3 < by; ++by3) {
@@ -1249,7 +1237,7 @@ extends AvMain {
                     }
                     byArray[n2] = -1;
                 }
-                mainObject.isFootSnow = n3;
+                mainObject.isFootSnow = (n3 != 0);
                 n2 = 9;
                 n = 14;
                 byte by7 = msg.reader().readByte();
@@ -1294,7 +1282,7 @@ extends AvMain {
                     if (mainObject == GameScreen.player) {
                         Item.VecEquipPlayer.put("" + by7, petItem);
                     }
-                    byArray[5] = s;
+                    byArray[5] = (byte)s;
                     if (GameCanvas.subDialog != null && GameCanvas.subDialog.type == 14 && MsgDialog.isInven_Equip == 1) {
                         MsgDialog.pet = petItem;
                     }
@@ -1333,6 +1321,7 @@ extends AvMain {
         try {
             short s = msg.reader().readShort();
             short s2 = msg.reader().readShort();
+            com.silverknight.HsoBridge.markMonsterDead(s2);
             MainObject mainObject = MainObject.get_Object(s2, (byte)1);
             if (GameScreen.help.setStep_Next(1, 2) && s == GameScreen.player.ID) {
                 ++GameScreen.help.Next;
@@ -1388,7 +1377,7 @@ extends AvMain {
                 short s2 = msg.reader().readShort();
                 n2 = msg.reader().readInt();
                 n = msg.reader().readInt();
-                Monster_Skill monster_Skill = new Monster_Skill(14);
+                Monster_Skill monster_Skill = new Monster_Skill((byte)14);
                 Object_Effect_Skill object_Effect_Skill = new Object_Effect_Skill(s2, by2, monster_Skill);
                 object_Effect_Skill.setHP(n2, n);
                 MainObject mainObject = MainObject.get_Object(s2, by2);
@@ -1448,7 +1437,7 @@ extends AvMain {
                     object = (Object_Effect_Skill)mainMonster.vecObjskill.elementAt(0);
                     mainMonster.IDAttack = ((Object_Effect_Skill)object).ID;
                     if (mainMonster.skillDefault == null) {
-                        mainMonster.skillDefault = new Monster_Skill(14);
+                        mainMonster.skillDefault = new Monster_Skill((byte)14);
                     }
                     if (!bl) {
                         ((Object_Effect_Skill)object).skillMonster = mainMonster.skillDefault;
@@ -1489,7 +1478,7 @@ extends AvMain {
                     bl2 = true;
                     mVector2.addElement(mainObject);
                 }
-                mainMonster.vecObjskill = object;
+                mainMonster.vecObjskill = (mVector)object;
                 mainMonster.hp = n4;
                 mainMonster.isRunAttack = true;
                 mainMonster.timeMaxMoveAttack = 3000;
@@ -1498,7 +1487,7 @@ extends AvMain {
                     Object_Effect_Skill object_Effect_Skill = (Object_Effect_Skill)mainMonster.vecObjskill.elementAt(0);
                     mainMonster.IDAttack = object_Effect_Skill.ID;
                     if (mainMonster.skillDefault == null) {
-                        mainMonster.skillDefault = new Monster_Skill(14);
+                        mainMonster.skillDefault = new Monster_Skill((byte)14);
                     }
                     if (!bl) {
                         object_Effect_Skill.skillMonster = mainMonster.skillDefault;
@@ -1519,7 +1508,7 @@ extends AvMain {
                     Object_Effect_Skill object_Effect_Skill = (Object_Effect_Skill)mainMonster.vecObjskill.elementAt(0);
                     mainMonster.IDAttack = object_Effect_Skill.ID;
                     if (mainMonster.skillDefault == null) {
-                        mainMonster.skillDefault = new Monster_Skill(14);
+                        mainMonster.skillDefault = new Monster_Skill((byte)14);
                     }
                     if (!bl) {
                         object_Effect_Skill.skillMonster = mainMonster.skillDefault;
@@ -1699,10 +1688,10 @@ extends AvMain {
                         long l = msg.reader().readLong();
                         MainTemplateItem by15 = MainTemplateItem.getPotionTem(s2);
                         if (by15 == null) continue;
-                        MainItem mainItem4 = new MainItem(by15.ID, by15.IconId, by15.name, by15.contentPotion, s6, 4, l, by15.typePotion, 0, 0, 0);
+                        MainItem mainItem4 = new MainItem(by15.ID, by15.IconId, by15.name, by15.contentPotion, s6, (byte)4, l, by15.typePotion, (byte)0, (byte)0, (byte)0);
                         mVector2.addElement(mainItem4);
                     }
-                    TabShopNew.idSeller = n4 = msg.reader().readShort();
+                    TabShopNew.idSeller = (short)(n4 = msg.reader().readShort());
                 } else if (by == SHOP_VANTIEU) {
                     by6 = TabShopNew.SHOP_VANTIEU;
                     for (n4 = 0; n4 < n5; ++n4) {
@@ -1730,7 +1719,7 @@ extends AvMain {
                         s = msg.reader().readShort();
                         MainTemplateItem mainTemplateItem = MainTemplateItem.getPotionTem(s);
                         if (mainTemplateItem == null) continue;
-                        MainItem mainItem6 = new MainItem(mainTemplateItem.ID, mainTemplateItem.IconId, mainTemplateItem.name, mainTemplateItem.contentPotion, 1, 4, mainTemplateItem.PricePoition, mainTemplateItem.typePotion, mainTemplateItem.moneyType, 0, 0);
+                        MainItem mainItem6 = new MainItem(mainTemplateItem.ID, mainTemplateItem.IconId, mainTemplateItem.name, mainTemplateItem.contentPotion, (short)1, (byte)4, mainTemplateItem.PricePoition, mainTemplateItem.typePotion, mainTemplateItem.moneyType, (byte)0, (byte)0);
                         mVector2.addElement(mainItem6);
                     }
                 } else if (by == SHOP_ITEM || by == WING || by == SHOP_ITEM_EVENT) {
@@ -1850,7 +1839,7 @@ extends AvMain {
                         s = msg.reader().readShort();
                         MainTemplateItem mainTemplateItem = MainTemplateItem.getPotionTem(s);
                         if (mainTemplateItem == null) continue;
-                        MainItem mainItem11 = new MainItem(mainTemplateItem.ID, mainTemplateItem.IconId, mainTemplateItem.name, mainTemplateItem.contentPotion, 1, 4, mainTemplateItem.PricePoition, mainTemplateItem.typePotion, mainTemplateItem.moneyType, 0, 0);
+                        MainItem mainItem11 = new MainItem(mainTemplateItem.ID, mainTemplateItem.IconId, mainTemplateItem.name, mainTemplateItem.contentPotion, (short)1, (byte)4, mainTemplateItem.PricePoition, mainTemplateItem.typePotion, mainTemplateItem.moneyType, (byte)0, (byte)0);
                         mVector2.addElement(mainItem11);
                     }
                 } else if (by == REPLACE) {
@@ -1859,7 +1848,7 @@ extends AvMain {
                 }
                 mVector mVector3 = new mVector("ReadMessenge vec11");
                 if (by != SHOP_ICONCLAN_FREE && by != SHOP_ICONCLAN_VIP && by != SHOP_POTION_CLAN) {
-                    TabShopNew tabShopNew = new TabShopNew(Item.VecInvetoryPlayer, 0, T.tabhanhtrang, -1, by5);
+                    TabShopNew tabShopNew = new TabShopNew(Item.VecInvetoryPlayer, (byte)0, T.tabhanhtrang, -1, by5);
                     tabShopNew.isShop_Other_Player = bl;
                     mVector3.addElement(tabShopNew);
                 }
@@ -2040,9 +2029,9 @@ extends AvMain {
                 byte by4 = msg.reader().readByte();
                 byte by5 = msg.reader().readByte();
                 by3 = msg.reader().readByte();
-                short by2 = msg.reader().readShort();
-                by = msg.reader().readBoolean();
-                MainTemplateItem s3 = new MainTemplateItem(s, (short)n3, l, string, string2, by4, by5, by3, by2, by != 0);
+                short by2 = (byte)msg.reader().readShort();
+                boolean isTrade = msg.reader().readBoolean();
+                MainTemplateItem s3 = new MainTemplateItem(s, (short)n3, l, string, string2, by4, by5, by3, by2, isTrade);
                 MainTemplateItem.hashPotionTem.put("" + s, s3);
             }
             n4 = msg.reader().readUnsignedByte();
@@ -2067,7 +2056,7 @@ extends AvMain {
                 short s3 = msg.reader().readShort();
                 byte by4 = msg.reader().readByte();
                 byte by5 = msg.reader().readByte();
-                MainItem mainItem = MainItem.MainItem_Material(s2, string, exception, 7, l, by2, string3, s3, by3, (short)1, by, by4);
+                MainItem mainItem = MainItem.MainItem_Material(s2, string, exception, (byte)7, l, by2, string3, s3, by3, (short)1, (byte)by, by4);
                 mainItem.setColorName(by5);
                 MainTemplateItem.hashMaterialTem.put("" + s2, mainItem);
             }
@@ -2286,12 +2275,12 @@ extends AvMain {
                     n3 = msg.reader().readByte();
                     n2 = msg.reader().readShort();
                     if (n2 <= 0) continue;
-                    object2 = new byte[n2];
+                    byte[] petEffArr = new byte[n2];
                     for (int i = 0; i < n2; ++i) {
-                        object2[i] = msg.reader().readByte();
+                        petEffArr[i] = msg.reader().readByte();
                     }
                     mVector mVector2 = new mVector();
-                    DataEffect dataEffect = new DataEffect((byte[])object2, n3, true);
+                    DataEffect dataEffect = new DataEffect(petEffArr, n3, true);
                     mVector2.addElement(dataEffect);
                     Pet.PET_DATA.put("" + n3, mVector2);
                 }
@@ -2301,20 +2290,17 @@ extends AvMain {
             }
             try {
                 n4 = msg.reader().readShort();
-                object = new byte[n4][];
+                byte[][] arrInfo = new byte[n4][];
                 for (n3 = 0; n3 < n4; ++n3) {
                     n2 = msg.reader().readByte();
-                    object[n3] = new byte[n2];
+                    arrInfo[n3] = new byte[n2];
                     for (int i = 0; i < n2; ++i) {
-                        object[n3][i] = msg.reader().readByte();
+                        arrInfo[n3][i] = msg.reader().readByte();
                     }
                 }
+                EffectSkill.arrInfoEff = arrInfo;
             }
             catch (Exception exception) {
-                object = null;
-            }
-            if (object != null) {
-                EffectSkill.arrInfoEff = object;
             }
             byte by = 0;
             try {
@@ -2342,7 +2328,7 @@ extends AvMain {
             int n;
             LoginScreen.saveUser_Pass();
             LoginScreen.saveIndexServer();
-            GameScreen.player = new Player(0, 0, "unname", 0, 0);
+            GameScreen.player = new Player(0, (byte)0, "unname", 0, 0);
             Item.VecInvetoryPlayer.removeAllElements();
             Item.VecChestPlayer.removeAllElements();
             SelectCharScreen.VecSelectChar.removeAllElements();
@@ -2372,7 +2358,7 @@ extends AvMain {
                 by = msg.reader().readByte();
                 msg.reader().readByte();
                 msg.reader().readByte();
-                Other_Players other_Players = new Other_Players(n6, 0, string, 0, 0);
+                Other_Players other_Players = new Other_Players(n6, (byte)0, string, 0, 0);
                 short s = msg.reader().readShort();
                 if (s >= 0) {
                     other_Players.myClan = new MainClan(0, s, msg.reader().readUTF(), msg.reader().readByte());
@@ -2433,17 +2419,17 @@ extends AvMain {
                 GameScreen.addPlayer(mainObject);
                 MiniMap.addNPCMini(new NPCMini(by, s, s2));
                 if (by != -52) continue;
-                Mount mount = new Mount(0, 2, s + 48, s2 + 10);
+                Mount mount = new Mount((byte)0, (byte)2, s + 48, s2 + 10);
                 if (!GameScreen.Vecplayers.contains(mount)) {
                     GameScreen.addPlayer(mount);
                 }
                 mount = null;
-                mount = new Mount(2, 0, s + 43, s2 - 4);
+                mount = new Mount((byte)2, (byte)0, s + 43, s2 - 4);
                 if (!GameScreen.Vecplayers.contains(mount)) {
                     GameScreen.addPlayer(mount);
                 }
                 mount = null;
-                mount = new Mount(3, 3, s - 18, s2 + 7);
+                mount = new Mount((byte)3, (byte)3, s - 18, s2 + 7);
                 if (GameScreen.Vecplayers.contains(mount)) continue;
                 GameScreen.addPlayer(mount);
             }
@@ -2477,7 +2463,7 @@ extends AvMain {
                 }
                 block7: for (int n3 = 0; n3 < n2; n3 = (int)((byte)(n3 + 1))) {
                     s = m.reader().readShort();
-                    n = m.reader().readBoolean();
+                    boolean isMainQ = m.reader().readBoolean();
                     string = m.reader().readUTF();
                     switch (by) {
                         case 0: {
@@ -2485,7 +2471,7 @@ extends AvMain {
                             String string2 = m.reader().readUTF();
                             by2 = m.reader().readByte();
                             String string3 = m.reader().readUTF();
-                            mainQuest = new MainQuest(s, n != 0, string, by4, string2, by2, string3);
+                            mainQuest = new MainQuest(s, isMainQ, string, by4, string2, by2, string3);
                             MainQuest.vecQuestList.addElement(mainQuest);
                             continue block7;
                         }
@@ -2493,7 +2479,7 @@ extends AvMain {
                             by3 = m.reader().readByte();
                             String string4 = m.reader().readUTF();
                             String string5 = m.reader().readUTF();
-                            mainQuest = new MainQuest((int)s, n != 0, string, by3, string4, string5);
+                            mainQuest = new MainQuest((int)s, isMainQ, string, by3, string4, string5);
                             MainQuest.vecQuestFinish.addElement(mainQuest);
                             continue block7;
                         }
@@ -2516,7 +2502,7 @@ extends AvMain {
                                     sArray[by5] = m.reader().readShort();
                                     sArray2[by5] = m.reader().readShort();
                                 }
-                                mainQuest = new MainQuest(s, n != 0, string, string7, by2, string6, by3, sArray3, sArray2, sArray, 0);
+                                mainQuest = new MainQuest(s, isMainQ, string, string7, by2, string6, by3, sArray3, sArray2, sArray, (byte)0);
                             } else if (by2 == 1) {
                                 byte by7 = m.reader().readByte();
                                 sArray3 = new short[by7];
@@ -2527,14 +2513,14 @@ extends AvMain {
                                     sArray[by5] = m.reader().readShort();
                                     sArray2[by5] = m.reader().readShort();
                                 }
-                                mainQuest = new MainQuest(s, n != 0, string, string7, by2, string6, by3, sArray3, sArray2, sArray, 1);
+                                mainQuest = new MainQuest(s, isMainQ, string, string7, by2, string6, by3, sArray3, sArray2, sArray, (byte)1);
                             } else if (by2 == 2) {
                                 by3 = m.reader().readByte();
                                 String string8 = m.reader().readUTF();
-                                mainQuest = new MainQuest((int)s, n != 0, string, string7, by3, string8);
+                                mainQuest = new MainQuest((int)s, isMainQ, string, string7, by3, string8);
                             }
                             if (mainQuest == null) continue block7;
-                            if (n) {
+                            if (isMainQ) {
                                 MainQuest.vecQuestDoing_Main.addElement(mainQuest);
                                 continue block7;
                             }
@@ -3037,7 +3023,7 @@ extends AvMain {
                     }
                     mSystem.outz("friend22 list i=" + i);
                     n3 = msg.reader().readByte();
-                    MainObject mainObject = new MainObject(0, 0, string3, 0, 0);
+                    MainObject mainObject = new MainObject(0, (byte)0, string3, 0, 0);
                     s = msg.reader().readShort();
                     if (s >= 0) {
                         mainObject.myClan = new MainClan(0, s, msg.reader().readUTF(), msg.reader().readByte());
@@ -3100,7 +3086,7 @@ extends AvMain {
             GameCanvas.timenextLogin = mSystem.currentTimeMillis() + (long)(by * 1000);
             GameScreen.player.resetAction();
             Session_ME.gI().close();
-            GameScreen.player = new Player(0, 0, "unname", 0, 0);
+            GameScreen.player = new Player(0, (byte)0, "unname", 0, 0);
         }
         catch (Exception exception) {
             // empty catch block
@@ -3239,7 +3225,7 @@ extends AvMain {
                         string = "";
                     }
                 }
-                object = new MainItem(s, string, s3, s2, by3, string2, mainInfoItemArray, by4, by5, s4, by6, 0, 0);
+                object = new MainItem(s, string, s3, s2, by3, string2, mainInfoItemArray, by4, by5, s4, by6, (byte)0, (byte)0);
                 Buy_Sell_Screen.setmItemOther((MainItem)object, by, by2);
             } else if (by == 4) {
                 GameCanvas.buy_sell.typeLock = msg.reader().readByte();
@@ -3317,9 +3303,8 @@ extends AvMain {
                     object = new mVector("ReadMessenge vec");
                     Object_Effect_Skill object_Effect_Skill = new Object_Effect_Skill((short)mainObject.ID, mainObject.typeObject);
                     ((mVector)object).addElement(object_Effect_Skill);
-                    if (by2 == 6) {
-                        mainInfoItemArray = (MainInfoItem[])mainObject;
-                        mainInfoItemArray.setState((byte)2);
+                    if (by2 == 6 && mainObject instanceof Pet) {
+                        ((Pet)mainObject).setState((byte)2);
                     }
                     mainObject.ListKillNow.setFireSkill(mainObject, (mVector)object, by3, by2);
                 }
@@ -3445,6 +3430,10 @@ extends AvMain {
                 n2 = msg.reader().readInt();
                 n = msg.reader().readInt();
                 object_Effect_Skill.setHP(n2, n);
+                if (temTo == 1) {
+                    com.silverknight.HsoBridge.updateMonsterHealth(n3, n);
+                    com.silverknight.HsoBridge.noteFarmDamageResult(s, n3, n2);
+                }
                 if (n3 == GameScreen.player.ID) {
                     n7 = GameScreen.player.maxHp;
                     n6 = n2 / n7 * 100;
@@ -3554,9 +3543,9 @@ extends AvMain {
                     }
                     by2 = msg.reader().readByte();
                     n = msg.reader().readByte();
-                    object = new String[n];
+                    String[] mountInfo = new String[n];
                     for (int i = 0; i < n; ++i) {
-                        object[i] = msg.reader().readUTF();
+                        mountInfo[i] = msg.reader().readUTF();
                     }
                     if (GameCanvas.showMount == null) {
                         GameCanvas.showMount = new infoShow();
@@ -3565,7 +3554,7 @@ extends AvMain {
                     GameCanvas.showMount.name = string;
                     GameCanvas.showMount.lv = s;
                     GameCanvas.showMount.exp = string2;
-                    GameCanvas.showMount.info = object;
+                    GameCanvas.showMount.info = mountInfo;
                     GameCanvas.showMount.Show(GameCanvas.currentScreen);
                 }
             }
@@ -3650,9 +3639,9 @@ extends AvMain {
                 by3 = msg.reader().readByte();
                 s3 = msg.reader().readByte();
                 n = msg.reader().readInt();
-                by2 = msg.reader().readShort();
+                by2 = (byte)msg.reader().readShort();
                 short s8 = msg.reader().readShort();
-                by = msg.reader().readShort();
+                by = (byte)msg.reader().readShort();
                 short s = msg.reader().readShort();
                 short s2 = msg.reader().readShort();
                 short s9 = msg.reader().readShort();
@@ -3668,7 +3657,7 @@ extends AvMain {
                 PetItem petItem = new PetItem(by5, (String)object, s4, s3, by7, 9, mainInfoItemArray, 14, s6, s4, by3, by4);
                 petItem.setInfoPet(n, by2, by, s, s2, s9, s8, s10, s5);
                 Info_Other_Player.vecEquipShow.put("" + by5, petItem);
-                byArray[5] = s4;
+                byArray[5] = (byte)s4;
                 Info_Other_Player.showPet = petItem;
             } else {
                 Info_Other_Player.showPet = null;
@@ -3712,8 +3701,18 @@ extends AvMain {
             GameScreen.RemoveLoadMap();
             LoadMapScreen.isNextMap = true;
             LoadMap.Area = msg.reader().readByte();
-            GameScreen.player.x = msg.reader().readShort() * 24;
-            GameScreen.player.y = msg.reader().readShort() * 24;
+            short newX = (short)(msg.reader().readShort() * 24);
+            short newY = (short)(msg.reader().readShort() * 24);
+            GameScreen.player.x = newX;
+            GameScreen.player.y = newY;
+            GameScreen.player.xStand = newX;
+            GameScreen.player.yStand = newY;
+            GameScreen.player.toX = newX;
+            GameScreen.player.toY = newY;
+            GameScreen.player.xStopMove = 0;
+            GameScreen.player.yStopMove = 0;
+            GameScreen.player.countAutoMove = 0;
+            GameScreen.player.timeSendmove = mSystem.currentTimeMillis();
             GameScreen.player.resetMove();
             GameScreen.player.posTransRoad = null;
             GameScreen.player.resetAction();
@@ -3725,6 +3724,9 @@ extends AvMain {
             GameCanvas.end_Dialog();
             GameCanvas.clearKeyHold();
             GameCanvas.load.isTele = false;
+            GameScreen.ObjFocus = null;
+            com.silverknight.HsoBridge.onAreaChanged();
+            com.silverknight.HsoBridge.onChangeAreaSuccess();
         }
         catch (Exception exception) {
             exception.printStackTrace();
@@ -3747,16 +3749,34 @@ extends AvMain {
             for (n2 = 0; n2 < LoadMap.MaxArea; ++n2) {
                 stringArray[n2] = msg.reader().readUTF();
             }
-            GameCanvas.start_Wait_Dialog(T.danglaydulieu, new iCommand(T.close, -1));
-            GameScreen.isReArea = false;
-            mVector mVector2 = new mVector("ReadMessenge menu4");
-            for (n = 0; n < LoadMap.MaxArea; ++n) {
-                iCommand iCommand2 = new iCommand(stringArray[n], 13, n, (AvMain)GameScreen.gI());
-                iCommand2.setFraCaption(PaintInfoGameScreen.fraStatusArea, 1, LoadMap.mStatusArea[n]);
-                mVector2.addElement(iCommand2);
+            if (com.silverknight.HsoBridge.pendingTargetArea >= 0) {
+                int target = com.silverknight.HsoBridge.pendingTargetArea;
+                com.silverknight.HsoBridge.pendingTargetArea = -1;
+                com.silverknight.HsoBridge.isSilentRequestArea = false;
+                GameCanvas.end_Dialog();
+                if (target < LoadMap.MaxArea && LoadMap.mStatusArea[target] < 2) {
+                    com.silverknight.HsoBridge.logDebug("Sending Change_Area(" + target + ") after area list");
+                    GlobalService.gI().Change_Area((byte)target);
+                } else {
+                    com.silverknight.HsoBridge.logDebug("Change_Area rejected: invalid or full area " + target);
+                }
+                return;
             }
-            GameCanvas.menu2.startAt(mVector2, 2, T.khuvuc, false, null);
-            GameCanvas.end_Dialog();
+            if (!com.silverknight.HsoBridge.isSilentRequestArea) {
+                GameCanvas.start_Wait_Dialog(T.danglaydulieu, new iCommand(T.close, -1));
+                GameScreen.isReArea = false;
+                mVector mVector2 = new mVector("ReadMessenge menu4");
+                for (n = 0; n < LoadMap.MaxArea; ++n) {
+                    iCommand iCommand2 = new iCommand(stringArray[n], 13, n, (AvMain)GameScreen.gI());
+                    iCommand2.setFraCaption(PaintInfoGameScreen.fraStatusArea, 1, LoadMap.mStatusArea[n]);
+                    mVector2.addElement(iCommand2);
+                }
+                GameCanvas.menu2.startAt(mVector2, 2, T.khuvuc, false, null);
+                GameCanvas.end_Dialog();
+            } else {
+                com.silverknight.HsoBridge.isSilentRequestArea = false;
+                GameCanvas.end_Dialog();
+            }
         }
         catch (Exception exception) {
             // empty catch block
@@ -3870,7 +3890,7 @@ extends AvMain {
                     short s = message.reader().readShort();
                     String string3 = message.reader().readUTF();
                     String string4 = message.reader().readUTF();
-                    MainClan mainClan = new MainClan(n4, s, string3, 122);
+                    MainClan mainClan = new MainClan(n4, s, string3, (byte)122);
                     mainClan.name = string2;
                     mainClan.slogan = string4;
                     mainClan.hang = n2 > n3 && n == n3 - 1 ? n2 : n;
@@ -3896,7 +3916,7 @@ extends AvMain {
                     }
                     n5 = message.reader().readByte();
                     String string6 = message.reader().readUTF();
-                    MainObject mainObject = new MainObject(0, 0, string5, 0, 0);
+                    MainObject mainObject = new MainObject(0, (byte)0, string5, 0, 0);
                     short s2 = message.reader().readShort();
                     if (s2 >= 0) {
                         mainObject.myClan = new MainClan(0, s2, message.reader().readUTF(), message.reader().readByte());
@@ -3915,18 +3935,18 @@ extends AvMain {
             }
             if (by == 1) {
                 if (n2 > n3) {
-                    MainObject mainObject = new MainObject(0, 0, "...", 0, 0);
+                    MainObject mainObject = new MainObject(0, (byte)0, "...", 0, 0);
                     mainObject.hang = -1;
                     mVector2.insertElementAt(mainObject, n3 - 1);
                 }
             } else if (by == 3) {
                 if (n2 > n3) {
-                    MainClan mainClan = new MainClan(0, -1, "...", 122);
+                    MainClan mainClan = new MainClan(0, (short)-1, "...", (byte)122);
                     mainClan.hang = -1;
                     mVector2.insertElementAt(mainClan, n3 - 1);
                 }
             } else if (by == 6 && n2 > n3) {
-                MainObject mainObject = new MainObject(0, 0, "...", 0, 0);
+                MainObject mainObject = new MainObject(0, (byte)0, "...", 0, 0);
                 mainObject.hang = -1;
                 mVector2.insertElementAt(mainObject, n3 - 1);
             }
@@ -4420,7 +4440,7 @@ extends AvMain {
             }
             n = msg.reader().readInt();
             byte by = msg.reader().readByte();
-            MainItem mainItem = new MainItem(s, string, s2, by4, by5, by2, n2, mainInfoItemArray, by3, false, -1, 0L, s3, by6, by7, n, 0, by);
+            MainItem mainItem = new MainItem(s, string, s2, by4, by5, by2, (short)n2, mainInfoItemArray, by3, false, (short)-1, 0L, s3, by6, by7, (short)n, (byte)0, by);
             return mainItem;
         }
         catch (Exception exception) {
@@ -4592,7 +4612,7 @@ extends AvMain {
                                         int n4 = msg.reader().readByte();
                                         MainInfoItem[] mainInfoItemArray = new MainInfoItem[n4];
                                         for (n3 = 0; n3 < n4; ++n3) {
-                                            by9 = msg.reader().readUnsignedByte();
+                                            by9 = (byte)msg.reader().readUnsignedByte();
                                             n2 = msg.reader().readInt();
                                             mainInfoItemArray[n3] = new MainInfoItem(by9, n2);
                                         }
@@ -4607,7 +4627,7 @@ extends AvMain {
                                         }
                                         byte by16 = msg.reader().readByte();
                                         MainItem mainItem = null;
-                                        mainItem = new MainItem(s, string, s3, by12, by13, by10, by2, mainInfoItemArray, by11, false, -1, 0L, s4, by14, by15, n3, 0, by9, n5, Long.parseLong(string2));
+                                        mainItem = new MainItem(s, string, s3, by12, by13, by10, by2, mainInfoItemArray, by11, false, (short)-1, 0L, s4, by14, by15, (short)n3, (byte)0, by9, n5, Long.parseLong(string2));
                                         mainItem.setCanShell_notCanTrade(by16);
                                         vec.addElement(mainItem);
                                     }
@@ -5030,7 +5050,7 @@ extends AvMain {
                             }
                             if (by3 == 0) {
                                 if (GameScreen.player.myClan == null) {
-                                    GameScreen.player.myClan = new MainClan(n2, s, string2, 122);
+                                    GameScreen.player.myClan = new MainClan(n2, s, string2, (byte)122);
                                 }
                                 GameScreen.player.myClan.setInfoClan(string, s3, s4, s5, s6, s7, string4, string5, string3, l, n, mainThanhTichClanArray);
                                 if (GameCanvas.clan == null) {
@@ -5039,7 +5059,7 @@ extends AvMain {
                                 GameCanvas.clan.setInfoClan(GameScreen.player.myClan, by3);
                                 GameCanvas.clan.Show(GameCanvas.currentScreen);
                             } else {
-                                MainClan mainClan = new MainClan(n2, s, string2, 122);
+                                MainClan mainClan = new MainClan(n2, s, string2, (byte)122);
                                 mainClan.setInfoClan(string, s3, s4, s5, s6, s7, string4, string5, string3, l, n, mainThanhTichClanArray);
                                 if (GameCanvas.clan == null) {
                                     GameCanvas.clan = new Clan_Screen();
@@ -5122,11 +5142,11 @@ extends AvMain {
                                 short s9 = msg.reader().readShort();
                                 short s10 = msg.reader().readShort();
                                 MainTemplateItem mainTemplateItem = (MainTemplateItem)MainTemplateItem.hashPotionTem.get("" + s9);
-                                MainItem mainItem = new MainItem(s9, mainTemplateItem.IconId, mainTemplateItem.name, mainTemplateItem.contentPotion, s10, 4, mainTemplateItem.PricePoition, mainTemplateItem.typePotion, mainTemplateItem.moneyType, 0, 0);
+                                MainItem mainItem = new MainItem(s9, mainTemplateItem.IconId, mainTemplateItem.name, mainTemplateItem.contentPotion, s10, (byte)4, mainTemplateItem.PricePoition, mainTemplateItem.typePotion, mainTemplateItem.moneyType, (byte)0, (byte)0);
                                 Item.VecClanInvetory.addElement(mainItem);
                             }
                             mVector mVector2 = new mVector("ReadMessenge vec3");
-                            TabShopNew tabShopNew = new TabShopNew(Item.VecClanInvetory, 12, T.tabBangHoi, -1, TabShopNew.NORMAL);
+                            TabShopNew tabShopNew = new TabShopNew(Item.VecClanInvetory, (byte)12, T.tabBangHoi, -1, TabShopNew.NORMAL);
                             mVector2.addElement(tabShopNew);
                             GameCanvas.shopNpc = new TabScreenNew();
                             GameCanvas.shopNpc.selectTab = 0;
@@ -5152,7 +5172,7 @@ extends AvMain {
                             break;
                         }
                         MainTemplateItem mainTemplateItem = (MainTemplateItem)MainTemplateItem.hashPotionTem.get("" + s12);
-                        MainItem mainItem = new MainItem(s12, mainTemplateItem.IconId, mainTemplateItem.name, mainTemplateItem.contentPotion, s13, 4, mainTemplateItem.PricePoition, mainTemplateItem.typePotion, mainTemplateItem.moneyType, 0, 0);
+                        MainItem mainItem = new MainItem(s12, mainTemplateItem.IconId, mainTemplateItem.name, mainTemplateItem.contentPotion, s13, (byte)4, mainTemplateItem.PricePoition, mainTemplateItem.typePotion, mainTemplateItem.moneyType, (byte)0, (byte)0);
                         Item.VecClanInvetory.addElement(mainItem);
                         break;
                     }
@@ -5429,7 +5449,7 @@ extends AvMain {
                 String string = msg.reader().readUTF();
                 TabRebuildItem.itemWing = null;
                 mVector mVector2 = new mVector("ReadMessenge vec12");
-                TabShopNew tabShopNew = new TabShopNew(Item.VecInvetoryPlayer, 0, T.tabhanhtrang, -1, TabShopNew.INVEN_AND_WING);
+                TabShopNew tabShopNew = new TabShopNew(Item.VecInvetoryPlayer, (byte)0, T.tabhanhtrang, -1, TabShopNew.INVEN_AND_WING);
                 mVector2.addElement(tabShopNew);
                 TabRebuildItem tabRebuildItem = null;
                 tabRebuildItem = new TabRebuildItem(string, TabRebuildItem.TYPE_REBUILD_WING);
@@ -5483,7 +5503,7 @@ extends AvMain {
             MainItem[] mainItemArray = new MainItem[n];
             for (int i = 0; i < n; ++i) {
                 String string2 = msg.reader().readUTF();
-                short by = msg.reader().readShort();
+                short by = (byte)msg.reader().readShort();
                 int n2 = msg.reader().readInt();
                 byte by2 = msg.reader().readByte();
                 byte by3 = msg.reader().readByte();
@@ -5713,7 +5733,7 @@ extends AvMain {
                             int n4 = msg.reader().readInt();
                             mainInfoItemArray[j] = new MainInfoItem(n3, n4);
                         }
-                        MainItem mainItem = new MainItem(s2, string, s3, by4, by5, s, by2, mainInfoItemArray, by3, false, -1, 0L, s4, 0, 0, -1, 0, 0);
+                        MainItem mainItem = new MainItem(s2, string, s3, by4, by5, s, by2, mainInfoItemArray, by3, false, (short)-1, 0L, s4, (byte)0, (byte)0, (short)-1, (byte)0, (byte)0);
                         Item.VecLotteryReward.addElement(mainItem);
                         continue;
                     }
@@ -5721,7 +5741,7 @@ extends AvMain {
                         short s5 = msg.reader().readShort();
                         s = msg.reader().readShort();
                         MainTemplateItem mainTemplateItem = (MainTemplateItem)MainTemplateItem.hashPotionTem.get("" + s5);
-                        MainItem mainItem = new MainItem(s5, mainTemplateItem.IconId, mainTemplateItem.name, mainTemplateItem.contentPotion, s, 4, mainTemplateItem.PricePoition, mainTemplateItem.typePotion, mainTemplateItem.moneyType, 0, 0);
+                        MainItem mainItem = new MainItem(s5, mainTemplateItem.IconId, mainTemplateItem.name, mainTemplateItem.contentPotion, s, (byte)4, mainTemplateItem.PricePoition, mainTemplateItem.typePotion, mainTemplateItem.moneyType, (byte)0, (byte)0);
                         Item.VecLotteryReward.addElement(mainItem);
                         continue;
                     }
@@ -5741,7 +5761,7 @@ extends AvMain {
                     Item.VecLotteryReward.addElement(mainItem3);
                 }
                 mVector mVector2 = new mVector("ReadMessenge vec13");
-                TabLottery tabLottery = new TabLottery(T.moly, Item.VecLotteryReward, 0);
+                TabLottery tabLottery = new TabLottery(T.moly, Item.VecLotteryReward, (byte)0);
                 mVector2.addElement(tabLottery);
                 GameCanvas.shopNpc = new TabScreenNew();
                 GameCanvas.shopNpc.selectTab = 0;
@@ -6055,7 +6075,7 @@ extends AvMain {
                         long l = msg.reader().readInt();
                         MainTemplateItem mainTemplateItem = MainTemplateItem.getPotionTem(s);
                         if (mainTemplateItem == null) continue;
-                        MainItem mainItem = new MainItem(mainTemplateItem.ID, mainTemplateItem.IconId, mainTemplateItem.name, mainTemplateItem.contentPotion + ". " + T.price + " " + MainItem.getDotNumber(l) + " " + T.coin, s5, 4, l, mainTemplateItem.typePotion, mainTemplateItem.moneyType, 0, 0);
+                        MainItem mainItem = new MainItem(mainTemplateItem.ID, mainTemplateItem.IconId, mainTemplateItem.name, mainTemplateItem.contentPotion + ". " + T.price + " " + MainItem.getDotNumber(l) + " " + T.coin, s5, (byte)4, l, mainTemplateItem.typePotion, mainTemplateItem.moneyType, (byte)0, (byte)0);
                         Item.VecItemSell.addElement(mainItem);
                     }
                     break;
@@ -6238,7 +6258,7 @@ extends AvMain {
                     }
                     byte by3 = msg.reader().readByte();
                     MainItem mainItem = null;
-                    mainItem = new MainItem(s, string, s2, by7, by8, by5, by4, mainInfoItemArray, by6, false, -1, 0L, s3, by9, by10, n2, 0, by2, n4, Long.parseLong(string2));
+                    mainItem = new MainItem(s, string, s2, by7, by8, by5, by4, mainInfoItemArray, by6, false, (short)-1, 0L, s3, by9, by10, (short)n2, (byte)0, by2, n4, Long.parseLong(string2));
                     mainItem.setCanShell_notCanTrade(by3);
                     TabRebuildItem.itemRe = mainItem;
                     break;
@@ -6436,4 +6456,3 @@ extends AvMain {
         }
     }
 }
-

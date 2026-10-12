@@ -27,7 +27,7 @@ extends MainObject {
         DataEffect dataEffect = (DataEffect)ALL_DATA_DYNAMIC_EFFECT.get(this.id + "");
         if (dataEffect != null && (imageIcon = GameData.getImgIcon((short)(this.id + 8700), 112)) != null && imageIcon.img != null) {
             byte[] byArray = DynamicEffect.getSequence(this.id);
-            dataEffect.paint(mGraphics2, byArray[this.index], n, n2, 0, imageIcon.img);
+            dataEffect.paint(g, byArray[this.index], n, n2, 0, imageIcon.img);
         }
     }
 
@@ -73,7 +73,7 @@ extends MainObject {
         DataEffect dataEffect = (DataEffect)ALL_DATA_DYNAMIC_EFFECT.get(this.id + "");
         if (dataEffect != null && (imageIcon = GameData.getImgIcon((short)(this.id + 8700), 112)) != null && imageIcon.img != null) {
             byte[] byArray = DynamicEffect.getSequence(this.id);
-            dataEffect.paint(mGraphics2, byArray[this.index], this.x, this.y, 0, imageIcon.img);
+            dataEffect.paint(g, byArray[this.index], this.x, this.y, 0, imageIcon.img);
         }
     }
 

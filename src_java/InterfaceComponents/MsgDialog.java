@@ -276,7 +276,7 @@ extends MainDialog {
                 GameScreen.player.resetAction();
                 Session_ME.gI().close();
                 GameCanvas.login.Show();
-                GameScreen.player = new Player(0, 0, "unname", 0, 0);
+                GameScreen.player = new Player(0, (byte)0, "unname", 0, 0);
                 SelectCharScreen.reSelect = false;
                 SelectCharScreen.Canselect = false;
                 break;
@@ -378,7 +378,7 @@ extends MainDialog {
             }
             case 16: {
                 mVector mVector2 = new mVector("MsgChat vec");
-                TabShopNew tabShopNew = new TabShopNew(Item.VecInvetoryPlayer, 0, T.choan, -1, TabShopNew.INVEN_FOOD_PET);
+                TabShopNew tabShopNew = new TabShopNew(Item.VecInvetoryPlayer, (byte)0, T.choan, -1, TabShopNew.INVEN_FOOD_PET);
                 tabShopNew.petCur = pet;
                 mVector2.addElement(tabShopNew);
                 GameCanvas.foodPet = new TabScreenNew();
@@ -1446,7 +1446,7 @@ extends MainDialog {
                     ((iCommand)object).setPos(this.xDia + this.wDia - 6, this.yDia + 4, PaintInfoGameScreen.fraCloseMenu, "");
                     this.cmdList.addElement(object);
                 } else {
-                    this.right = object;
+                    this.right = (iCommand)object;
                 }
             }
         } else if (this.type == 3 || this.type == 6 || this.type == 14) {

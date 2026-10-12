@@ -46,11 +46,11 @@ extends MainScreen {
             }
             boolean bl2 = bl = byArray2 == null && savedServerHost == null;
             if (byArray != null) {
-                inputStream = new DataInputStream(new ByteArrayInputStream(byArray));
-                if (LogoScreen.applyServerList(inputStream.readUTF(), bl)) {
+                DataInputStream dis = new DataInputStream(new ByteArrayInputStream(byArray));
+                if (LogoScreen.applyServerList(dis.readUTF(), bl)) {
                     serverListSource = "RMS";
                 }
-                inputStream.close();
+                dis.close();
             }
             if (LogoScreen.applyServerList(strListserver = TemMidlet.connectHTTP(GameCanvas.linkIP), bl)) {
                 serverListSource = "HTTP";
@@ -113,7 +113,7 @@ extends MainScreen {
             return false;
         }
         String[][] stringArray2 = new String[n2][2];
-        objectArray = new int[n2];
+        int[] portArray = new int[n2];
         int[] nArray = new int[n2];
         int n3 = 0;
         try {
@@ -122,7 +122,7 @@ extends MainScreen {
                 if (stringArray3.length < 4) continue;
                 stringArray2[n3][0] = stringArray3[0].trim();
                 stringArray2[n3][1] = stringArray3[1].trim();
-                objectArray[n3] = (String)Integer.parseInt(stringArray3[2].trim());
+                portArray[n3] = Integer.parseInt(stringArray3[2].trim());
                 nArray[n3] = Byte.parseByte(stringArray3[3].trim());
                 ++n3;
             }
@@ -131,7 +131,7 @@ extends MainScreen {
             return false;
         }
         mSystem.listServer = stringArray2;
-        GameCanvas.portServer = (int[])objectArray;
+        GameCanvas.portServer = portArray;
         GameCanvas.langServer = nArray;
         n = -1;
         if (string2 != null) {

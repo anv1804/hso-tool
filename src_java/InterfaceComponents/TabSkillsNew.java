@@ -238,7 +238,7 @@ extends MainTabNew {
     }
 
     public void addEffectRebuild(int type, int x, int y, int time) {
-        EffectSkill effectSkill = new EffectSkill(type, x, y, time, 0, 0);
+        EffectSkill effectSkill = new EffectSkill(type, x, y, time, (short)0, (byte)0);
         this.vecEffRe.addElement(effectSkill);
     }
 

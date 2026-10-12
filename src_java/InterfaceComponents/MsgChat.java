@@ -457,13 +457,13 @@ extends MainDialog {
     public void addNewChat(String name, String FristContent, String content, byte type, boolean isFocus) {
         String[] stringArray;
         for (int i = 0; i < vecChatTab.size(); ++i) {
-            stringArray = (String[])vecChatTab.elementAt(i);
-            if (stringArray.name.compareTo(name) != 0) continue;
+            ChatDetail cd = (ChatDetail)vecChatTab.elementAt(i);
+            if (cd.name.compareTo(name) != 0) continue;
             if (isFocus) {
                 idSelect = i;
             }
             if (content.length() > 0) {
-                stringArray.addString(FristContent + content, name);
+                cd.addString(FristContent + content, name);
                 String[] stringArray2 = mFont.tahoma_7_white.splitFontArray(content, GameCanvas.mevent.wDia / 5 * 2);
                 GameCanvas.mevent.addEvent(name, (byte)0, stringArray2[0], 0);
             }

@@ -2965,7 +2965,7 @@ extends AvMain {
         this.slotGem = new byte[this.arrayGemKham[8 + n].length];
         for (int i = 0; i < this.arrayGemKham.length; ++i) {
             for (int j = 0; j < this.arrayGemKham[i].length; ++j) {
-                this.slotGem[j] = this.arrayGemKham[8 + n][j] >= 23 && this.arrayGemKham[8 + n][j] <= 27 ? 0 : (this.arrayGemKham[8 + n][j] >= 28 && this.arrayGemKham[8 + n][j] <= 32 ? 1 : -1);
+                this.slotGem[j] = (byte)(this.arrayGemKham[8 + n][j] >= 23 && this.arrayGemKham[8 + n][j] <= 27 ? 0 : (this.arrayGemKham[8 + n][j] >= 28 && this.arrayGemKham[8 + n][j] <= 32 ? 1 : -1));
             }
         }
     }

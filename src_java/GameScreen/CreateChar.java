@@ -87,7 +87,7 @@ extends MainScreen {
         }
         this.left = this.cmdBack;
         for (n = 0; n < 4; ++n) {
-            Other_Players other_Players = new Other_Players(n, 0, "", 0, 0);
+            Other_Players other_Players = new Other_Players(n, (byte)0, "", 0, 0);
             other_Players.clazz = (byte)n;
             other_Players.leg = n;
             other_Players.body = n;
@@ -174,7 +174,7 @@ extends MainScreen {
                 if (SelectCharScreen.VecSelectChar.size() == 0) {
                     GameCanvas.login.Show();
                     Session_ME.gI().close();
-                    GameScreen.player = new Player(0, 0, "unname", 0, 0);
+                    GameScreen.player = new Player(0, (byte)0, "unname", 0, 0);
                     break;
                 }
                 GameCanvas.selectChar.Show();

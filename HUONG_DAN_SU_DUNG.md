@@ -18,16 +18,27 @@
 
 Hệ thống đã được cài đặt **OpenJDK 8 JRE** (`/usr/lib/jvm/java-8-openjdk-amd64/jre/bin/java`) và **MicroEmulator**.
 
-### Lệnh chạy trực tiếp:
+### Cách 1: Sử Dụng Giao Diện Tool HSO Studio (Khuyên dùng):
 ```bash
-./run_java.sh
+./run_tool.sh
 ```
-Hoặc nếu muốn chỉ định file jar cụ thể:
-```bash
-./run_java.sh KnightOnline_v403.jar
-```
+*Giao diện đồ họa thiết kế theo phong cách game Hiệp Sĩ Online (panel gỗ, viền vàng kim, nút thợ rèn 3D) giúp bạn:*
+- Bấm 1-click chọn độ phân giải chuẩn (`800x480`, `1024x600`, `640x360`, `480x320` hoặc tùy chỉnh).
+- Khởi chạy / Đóng game dễ dàng, theo dõi PID tiến trình.
+- Đổi IP / Port Server (Teamobi gốc, Localhost hoặc VPS riêng).
+- Mở khóa 60 FPS, chỉnh tốc độ chạy, 1-click đóng gói (re-pack) JAR hoặc khôi phục bản gốc.
+- Tra cứu đầy đủ bảng phím tắt điều khiển trên PC.
 
-*Lưu ý:* Khi chạy trên giao diện Desktop (Cinnamon/X11), cửa sổ MicroEmulator sẽ tự động mở lên, bạn có thể chỉnh Options -> Select Device để chọn độ phân giải màn hình hoặc kích thước giả lập phù hợp.
+### Cách 2: Khởi chạy trực tiếp qua dòng lệnh:
+```bash
+# Mở mặc định (800x480, không vỏ điện thoại):
+./run_java.sh
+
+# Mở với kích thước tùy chọn:
+./run_java.sh 800 480
+./run_java.sh 1024 600
+```
+*Lưu ý:* Khi cửa sổ game mở lên, bạn có thể dùng chuột kéo giãn các mép cửa sổ tùy thích để phóng to/thu nhỏ màn hình (đã mod hỗ trợ tự động căn giữa lại lúc runtime).
 
 ---
 

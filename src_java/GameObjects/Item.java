@@ -574,9 +574,9 @@ public class Item {
         String string = this.mcontent[0];
         int n3 = this.mColor[0];
         for (n = 1; n < this.mcontent.length; ++n) {
-            object = mFont.tahoma_7_black.splitFontArray(this.mcontent[n], n2);
-            for (int i = 0; i < ((String[])object).length; ++i) {
-                Atb_info atb_info = new Atb_info(object[i], (byte)this.mColor[n]);
+            String[] splitArr = mFont.tahoma_7_black.splitFontArray(this.mcontent[n], n2);
+            for (int i = 0; i < splitArr.length; ++i) {
+                Atb_info atb_info = new Atb_info(splitArr[i], (byte)this.mColor[n]);
                 mVector2.addElement(atb_info);
             }
         }
@@ -585,9 +585,9 @@ public class Item {
         this.mcontent[0] = string;
         this.mColor[0] = n3;
         for (n = 0; n < mVector2.size(); ++n) {
-            object = (Atb_info)mVector2.elementAt(n);
-            this.mcontent[n + 1] = object.info;
-            this.mColor[n + 1] = object.id_color;
+            Atb_info atb = (Atb_info)mVector2.elementAt(n);
+            this.mcontent[n + 1] = atb.info;
+            this.mColor[n + 1] = atb.id_color;
         }
     }
 

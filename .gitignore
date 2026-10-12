@@ -13,3 +13,15 @@ extracted_exe/
 !microemulator-3.0.0.jar
 !cfr-0.152.jar
 !vineflower-1.10.1.jar
+
+bin/
+*.orig
+__pycache__/
+tool_config.json
+client_state.json*
+client_command.json*
+client_commands/
+build_patch/
+hso_debug.log
+hso_cmd.json
+HSO301/
