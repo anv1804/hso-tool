@@ -231,7 +231,7 @@ extends MainListSkill {
                 int dur = (skill != null) ? skill.performDur : 350;
                 long l = GameCanvas.timeNow - lastTime;
                 if (l > (long)GlobalCountdown) {
-                    GlobalCountdown = dur;
+                    GlobalCountdown = (short)dur;
                     lastTime = GameCanvas.timeNow;
                     this.sendSkill();
                 }

@@ -800,7 +800,7 @@ public class HsoBridge {
         }
     }
 
-    private static MainObject findPinnedMonster() {
+    public static MainObject findPinnedMonster() {
         if (pinnedMonsterId < 0 || GameScreen.Vecplayers == null || GameCanvas.loadmap == null
                 || pinnedMapId != GameCanvas.loadmap.idMap || pinnedArea != LoadMap.Area) {
             return null;

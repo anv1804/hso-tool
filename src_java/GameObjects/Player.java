@@ -1155,7 +1155,7 @@ extends MainObject {
 
     public boolean setDelaySkill(int t, int index) {
         if (t == 0) {
-            return Skill.ListSkill.canAttack();
+            return ListSkill.canAttack();
         }
         if (mCurentLvSkill[t] - 1 < 0) {
             if (index >= 0) {
@@ -1259,7 +1259,7 @@ extends MainObject {
                     Player.timeDelaySkill[index].isSkillAttack = true;
                 }
             } else if (index == 0) {
-                Skill.ListSkill.doSetTimeAtt();
+                ListSkill.doSetTimeAtt();
             }
         }
     }

@@ -87,15 +87,9 @@ run_java.bat KnightOnline_v403.jar 800 480
 
 Khi bạn chỉnh sửa code trong thư mục `src_java/`:
 
-### Cách 1: Bằng Script 1-click trên Windows:
-Nhấp đúp chuột vào:
-```cmd
-build_jar.bat
-```
-Hoặc qua PowerShell:
-```powershell
-.\build_jar.ps1
-```
+### Cách 1: Bằng Script 1-click:
+* **Trên Windows**: Nhấp đúp chuột vào `build_jar.bat` (hoặc PowerShell: `.\build_jar.ps1`).
+* **Trên Linux / macOS**: Chạy `./build_jar.sh`.
 
 ### Cách 2: Trực tiếp trong HSO Tool Studio:
 Bấm nút **"Repack JAR"** trong menu cài đặt của tool, hệ thống sẽ tự động gọi javac biên dịch 196 file Java với bytecode tương thích và chèn ngược vào file `KnightOnline_v403.jar`.
