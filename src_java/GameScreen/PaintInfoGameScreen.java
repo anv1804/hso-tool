@@ -1471,8 +1471,21 @@ public class PaintInfoGameScreen {
                     if (PaintInfoGameScreen.isMarket(GameCanvas.loadmap.idMap) && !mainObject.isSelling() && mainObject.typeObject == 0) {
                         return;
                     }
-                    mainObject.timeStand = 5;
-                    GameScreen.ObjFocus = mainObject;
+                    if (GameScreen.ObjFocus == mainObject) {
+                        if (mainObject.typeObject == 1) {
+                            Player.isAutoFire = 1;
+                            Player.isCurAutoFire = true;
+                            GameScreen.player.IDAttack = mainObject.ID;
+                            GameCanvas.keyMyPressed[25] = true;
+                            GameCanvas.keyMyPressed[5] = true;
+                        }
+                    } else {
+                        mainObject.timeStand = 5;
+                        GameScreen.ObjFocus = mainObject;
+                        if (mainObject.typeObject == 1) {
+                            mainObject.canFocusMon = true;
+                        }
+                    }
                     GameCanvas.isPointerSelect = false;
                     if (MainObject.getDistance(mainObject.x, mainObject.y, GameScreen.player.x, GameScreen.player.y) <= GameScreen.player.wFocus) {
                         GameScreen.player.setPointFocus();

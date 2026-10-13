@@ -43,6 +43,12 @@ implements IMessageHandler {
     }
 
     public void onMessage(Message msg) {
+        if (msg != null) {
+            byte cmd = msg.command;
+            if (cmd == 16 || cmd == 23 || cmd == 27 || cmd == 36 || cmd == 37 || cmd == -1 || cmd == -30 || cmd == -31 || cmd == -32 || cmd == -44 || cmd == 12 || cmd == 18) {
+                com.silverknight.HsoBridge.logDebug("RECV PKT: cmd=" + cmd);
+            }
+        }
         switch (msg.command) {
             case -96: {
                 GameCanvas.readMessenge.npcServer(msg);

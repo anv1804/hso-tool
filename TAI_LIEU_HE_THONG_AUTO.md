@@ -70,63 +70,88 @@ Hệ thống bao gồm 2 thành phần chính hoạt động song song và đồ
   - Khi quái di chuyển: `updateMonsterPosition(id, x, y)` cập nhật ngay lập tức lên Radar.
   - Khi quái hồi sinh: `onMonsterRespawned(id)` phục hồi `hp = maxHp` tức thì mà không cần đợi gói tin phụ.
 
-### 3.3. Giao diện Radar & Danh sách quái 2 cột
-- **Radar trực quan**:
-  - Chấm đỏ: Quái vật đang sống.
-  - Chấm xám: Quái vật đã chết (đang đếm ngược hồi sinh).
-  - Vòng tròn trắng: Quái vật hoặc đối tượng đang được ghim mục tiêu.
-  - Chấm vàng: Người chơi khác trong khu.
-  - Chấm xanh lá: Bản thân nhân vật.
-  - Biểu tượng đa giác: Cổng chuyển map, lối đi, khu vực, đá dịch chuyển.
-- **Danh sách quái 2 cột (Grid View)**:
-  - Hiển thị song song 2 cột, chứa được tới 60-90 quái mà không cần cuộn chuột.
-  - Mỗi ô hiển thị: `#ID Tên` (ví dụ `#14 Chuột`, `#27 Lửa`), thanh máu mini và số HP rút gọn (ví dụ `1.2k`, `850` hoặc đếm ngược `HS 3.2s`).
-  - Hỗ trợ click chuột vào ô để **Ghim mục tiêu** hoặc thêm vào cấu hình Farm.
+### 3.3. Giao diện Radar & Danh sách Đa Thẻ (Quái / Người chơi / NPC)
+- **Radar trực quan toàn diện (Quét cả NPC & Người & Quái)**:
+  - Chấm đỏ (`●`): Quái vật đang sống.
+  - Chấm xám (`●`): Quái vật đã chết (đang đếm ngược hồi sinh).
+  - Vòng tròn trắng viền ngoài: Quái vật hoặc đối tượng đang được ghim mục tiêu.
+  - Ô vuông xanh lam ngọc (`■`): **NPC nhân vật & chức năng** (Aman, Lisa, Hammer, Doubar, Zoro, v.v.).
+  - Tam giác cam (`▲`): Cột chuyển khu vực (Khu).
+  - Hình thoi xanh ngọc (`◆`): Đá dịch chuyển (Teleport stone).
+  - Hình thoi tím (`◆`): Cổng chuyển map, lối đi.
+  - Chấm vàng (`●`): Người chơi khác trong khu.
+  - Chấm xanh lá (`●`): Bản thân nhân vật.
+  - **HUD Tooltip tương tác khi rê chuột (Hover Tooltip)**: Rê chuột tới bất kỳ điểm nào trên Radar sẽ hiện vòng tròn chỉ điểm kèm nhãn thông tin chi tiết (ví dụ: `[NPC] Aman`, `[Cổng] Khu mỏ`, `[Người] tramanh356 (Lv 34)`, `[Quái] #9 Chuột`).
+- **Hệ thống 3 Thẻ Danh Sách (MON / PL / NPC)**:
+  - **MON**: Danh sách quái 2 cột (Grid View) hiển thị song song tới 60-90 quái, thanh máu mini, số HP rút gọn và đếm ngược hồi sinh mượt mà 0.1s.
+  - **PL**: Danh sách người chơi trong khu kèm Level, thanh máu HP và khoảng cách.
+  - **NPC**: Danh sách toàn bộ NPC trên bản đồ sắp xếp theo khoảng cách từ gần đến xa kèm cự ly chính xác tính theo pixel.
 
 ---
 
 ## 4. CƠ CHẾ AUTO FARM 1-HIT TOÀN MAP (FULL MAP FARM BURST)
 
-### 4.1. Đặc tính giao thức Server HSO & Cơ chế Double Hit Đồng Bộ 100%
+### 4.1. Đặc tính giao thức Server HSO & Cơ chế Ra Đòn Đồng Bộ Tuyệt Đối (Zero-Desync Burst)
 - Gói tin tấn công `fire_monster(mVector targets, byte typekill)` gửi opcode 9 lên server.
-- **Nguyên nhân gây mất đồng bộ trước đây**:
-  - Khi gửi gói gộp `fire_monster(allTargets, (byte)0)` kèm theo gói lẻ: Server với Skill 0 chỉ trừ máu con đầu tiên, khiến con đầu tiên bị ăn **Double Hit** (2 đòn) trong khi các con còn lại chỉ ăn 1 đòn. Con đầu tiên chết trước, kéo theo chu kỳ lệch pha dây chuyền.
-  - Đồng thời việc gán `player.IDAttack = targets[0]` khiến client khóa mục tiêu vào 1 con, tạo cảm giác nhân vật nhắm đánh 1 con trước rồi mới đánh cả map.
-- **Giải pháp Double Hit Đồng Bộ Hoàn Hảo**:
-  - Hủy bỏ việc khóa mục tiêu (`player.IDAttack = -1`, `player.KillFire = -1`, `GameScreen.ObjFocus = null`).
-  - Loại bỏ hoàn toàn gói gộp thừa.
-  - Áp dụng 2 vòng lặp gửi đòn đánh:
-    - Vòng 1: Gửi Hit 1 cho 100% quái trong danh sách.
-    - Vòng 2: Gửi Hit 2 (Double Hit) cho 100% quái trong danh sách.
-  - **100% quái nhận chính xác 2 hit như nhau**, máu cùng tụt 2 nhịp đồng loạt, sát thương nhân đôi và không con nào bị lệch.
+- **Nguyên nhân cốt lõi gây hiện tượng lệch máu (con về 732, con về 1.2k, con bị delay máu)**:
+  1. *Lỗi gửi 2 vòng lặp (Double Hit) cùng lúc*: Server HSO áp dụng cooldown nhận đòn cho từng quái. Khi client gửi 2 vòng lặp liên tiếp trong 0.05ms (40 gói tin), server bị quá tải socket và DROP gói thứ 2 của hầu hết các quái, chỉ tình cờ lọt qua 1 con (như con #28) nên con đó bị trừ 2 hit (732) còn các con khác chỉ trừ 1 hit (1.2k).
+  2. *Lỗi race condition từ monster_info round-robin*: Vòng lặp spam 4 gói `monster_info` mỗi 60ms làm nghẽn socket TCP; gói tin `monster_info` gửi trước đòn đánh bay về sau mang giá trị máu cũ 1700 ghi đè làm thanh máu 2 con bị dài ra, khi dừng auto hàng đợi mới thông thoáng và máu mới tụt xuống.
+- **Giải pháp Tối Ưu Tuyệt Đối**:
+  1. *Gửi chính xác đúng 1 hit duy nhất cho mỗi quái trong mỗi đợt*: Mỗi chu kỳ 1.0s chỉ gửi đúng 1 gói tin `fire_monster` cho mỗi con quái trong danh sách. Socket truyền cực nhẹ, 100% quái cùng nhận 1 hit, máu cùng tụt đều 100% về 1.2k (không con nào bị rơi về 732).
+  2. *Tạm dừng round-robin monster_info khi đang Auto Farm*: Loại bỏ hoàn toàn bão gói tin gây nghẽn socket và triệt tiêu race condition. Máu quái được server tự động cập nhật chuẩn xác từng mili-giây qua gói sát thương `updateMonsterHealth`.
+  3. *Chặn gói tin trễ ghi đè tăng máu quái sống*: Trong `rememberMonsterInfo` và `rememberLocalMonster`, tuyệt đối không ghi đè tăng máu nếu quái đang sống đã bị trừ sát thương.
+  4. *Đồng bộ hai chiều tức thời*: `updateMonsterHealth` cập nhật đồng thời cả bảng ghi `record.hp` lẫn đối tượng `localObj.hp` trong tầm nhìn client, thanh máu trên Tool và trong game đồng bộ tức thời.
 
-### 4.2. Tối ưu nhịp đánh chuẩn 1.0 giây (Quái cần 2-3 đợt đánh)
-- Chiêu đánh thường cơ bản của tất cả các phái có **thời gian hồi gốc là 1s (1000ms)**.
-- Khi đánh quái cấp cao hoặc máu lớn cần 2 đợt (4 hit) mới chết:
+### 4.2. Tối ưu nhịp đánh chuẩn 1.08 giây (Chống Drop gói tin & Đảm bảo đồng bộ 100%)
+- Chiêu đánh thường cơ bản của tất cả các phái có **thời gian hồi gốc trên server là 1s (1000ms)**.
+- Khi đánh quái cần 2-3 đợt đánh mới chết:
   - Hàm `getNormalAttackCooldownMs()` đọc thời gian hồi thực tế từ `skill.mLvSkill[lv].getdelay()`.
-  - Tự động trừ bù **50ms độ trễ mạng** (`latency ~ 950ms`).
-  - Đợt đánh kế tiếp (Hit 3, Hit 4) được phóng đi chính xác tại thời điểm chiêu vừa hồi, server chấp nhận 100% đòn đánh mà không bị trễ hay nghẽn nhịp.
+  - Tự động cộng thêm **khoảng đệm an toàn 80ms** (`attackCooldown = 1080ms`):
+    - Khắc phục triệt để hiện tượng gói tin bay tới server ở mốc 950-980ms bị server anticheat drop do chưa hết 1.000ms hồi chiêu.
+    - Đảm bảo 100% gói tin của TẤT CẢ các con quái trong danh sách đều vượt qua mốc 1.000ms trên server, không sót bất kỳ con nào.
+    - Mọi con quái cùng nhận sát thương ở mọi chu kỳ, thanh máu tụt đều tăm tắp và chết cùng một lúc.
 
-### 4.3. Cơ chế đón đầu hồi sinh sớm 500ms (Preemptive Strike)
+### 4.3. Cơ chế đồng bộ nhịp hồi sinh an toàn (+100ms buffer)
 - Khi **toàn bộ quái được chọn đã chết** (`aliveCount == 0`):
   - Hệ thống tính toán thời điểm con quái chết **MUỘN NHẤT** hồi sinh (`latestDeadRespawnDue`).
-  - Khi đồng hồ đếm ngược còn **500ms** (`now >= latestDeadRespawnDue - 500L`):
-  - Phóng gói tin tấn công đón đầu lên server.
-  - Khi quái vừa thành hình trên server thì sát thương đã có sẵn tại mili-giây 0, quái chết ngay lập tức mà không kịp xuất hiện trên màn hình hay phát hoạt ảnh.
+  - Chờ đến mốc quái đã chắc chắn hồi sinh xong trên server (`now >= latestDeadRespawnDue + 100L`).
+  - Phóng gói tin Hit 1 đồng loạt cho toàn bộ quái trong danh sách.
+  - Ngăn chặn hoàn toàn việc đánh sớm trước khi quái kịp xuất hiện trên server (tránh việc con sinh sớm thì nhận đòn còn con sinh muộn bị hụt đòn gây lệch máu).
 
 ### 4.4. Thuật toán Đồng bộ Pha Hội tụ (Phase Sync Convergence / Hold Fire)
 - Khi trong map có sự lệch pha (một số quái sống và một số quái đang đếm ngược hồi sinh):
   1. **Nếu có quái sống đang bị thương dở dang** (`hp < maxHp`): Hệ thống đánh tiếp các con đang bị thương để dứt điểm chúng, đưa toàn bộ đàn về trạng thái CHẾT.
   2. **Nếu các quái sống đều full máu (mới hồi sinh sớm)** trong khi các quái khác vẫn đang đếm ngược hồi sinh:
      - Hệ thống kích hoạt trạng thái **HOLD FIRE (Giữ nhịp)**: Tuyệt đối không đánh lẻ tẻ con vừa hồi sinh sớm.
-     - Chờ cho đến khi con chết muộn nhất chạm mốc đón đầu 500ms.
-     - Lúc này 100% đàn quái đều có mặt (hoặc vừa đón đầu hồi sinh), hệ thống tung đòn gom toàn bộ quái trong map vào **đúng 1 nhịp đánh duy nhất**.
-  3. Kể từ thời điểm đó, **toàn bộ đàn quái hội tụ về chung 1 giây hồi sinh và 1 giây chết**, duy trì trạng thái đồng bộ vĩnh viễn!
+     - Chờ cho đến khi con chết muộn nhất hồi sinh hoàn toàn trên server (`+100ms`).
+     - Lúc này 100% đàn quái đều đã hồi sinh, hệ thống tung đòn gom toàn bộ quái trong map vào **đúng 1 nhịp đánh duy nhất**.
+### 4.5. Nút chuyển đổi Chế độ Đồng bộ Farm (Sync / Free Farm Mode)
+- Nút chuyển đổi tích hợp trực tiếp trên thanh công cụ của modal Auto Fam:
+  - **🔄 ĐỒNG BỘ: BẬT (Mặc định)**:
+    - Kích hoạt thuật toán **Hold Fire & Hội tụ**: Hệ thống sẽ kiên nhẫn đợi cả đàn quái hồi sinh hoặc dứt điểm các con quái dở dang rồi gom toàn bộ vào đúng 1 nhịp đánh.
+    - Đảm bảo 100% quái cùng nhận đòn, cùng tụt máu đều, chết cùng 1 giây và hồi sinh cùng 1 giây.
+  - **⚡ TỰ DO: RA LÀ HIT (TẮT Đồng bộ)**:
+    - Bỏ qua toàn bộ cơ chế Hold Fire và không đợi con chết muộn nhất.
+    - Cứ con nào trong danh sách chọn còn sống hoặc vừa hồi sinh sớm là hệ thống **HIT NGAY LẬP TỨC**.
+    - Phù hợp với người chơi thích farm liên tục, tối đa hóa sát thương dồn mà không cần chờ đợi chu kỳ hội tụ của cả bầy quái.
 
-### 4.5. Quản lý cấu hình Farm theo từng Map
+### 4.6. Quản lý cấu hình Farm theo từng Map
 - Cấu hình farm được lưu trữ theo hồ sơ từng bản đồ (`map_id`).
 - Khi người chơi di chuyển sang map khác chưa có cấu hình: Auto Farm tự động tạm dừng để tránh đánh nhầm.
 - Khi quay trở lại map đã cấu hình: Hệ thống tự động nhận diện và tiếp tục farm.
+
+### 4.7. Cơ chế Đếm Ngược & Thời Gian Hồi Sinh Quái Chuẩn Xác (Respawn Countdown & 0.1s Tick)
+- **Thời gian hồi sinh quái thực tế trong HSO**:
+  - Các loại quái thường (Chuột, Lửa, Nấm, Sói, Nhện, Bọ cạp...) có thời gian hồi sinh chuẩn là **5.0 giây** (`5000ms`).
+  - *Khắc phục triệt để lỗi kẹt 1.8s*: Trước đây hệ thống tự đo đạc nhầm khoảng thời gian hiệu ứng bay chết (`startDeadFly` ~1.5s-1.8s) hoặc gói tin delay từ server, dẫn tới việc ghi đè thời gian hồi sinh thành 1.8s. Hiện tại giá trị mặc định được cố định chuẩn 5.0s, bỏ qua giá trị rác sentinel 1500 của client gốc, và chỉ hiệu chỉnh khi nhận gói tạo quái mới thực tế (`by == 1`).
+  - *Triệt tiêu vòng lặp reset thời gian chết*: Client không tự tiện gán quái hồi sinh giả trong `advanceMonsterRefresh`, loại bỏ hoàn toàn hiện tượng reset `death_time` lặp lại làm đồng hồ nhảy giật lùi về 1.8s.
+- **Bước nhảy đếm ngược mượt mà 0.1 giây (Smooth 100ms Tick)**:
+  - Bổ sung luồng `countdown_tick_loop` chạy chu kỳ độc lập **100ms** (0.1 giây) trên giao diện Tool Python.
+  - Đồng hồ đếm ngược trên bảng quái và modal Auto Fam giảm đều đặn mượt mà đúng từng **0.1s** (`5.0s -> 4.9s -> 4.8s -> ... -> 0.1s -> 0.0s`), triệt tiêu hoàn toàn hiện tượng giật cục 0.4s.
+  - Khi đếm ngược về 0s mà server chưa gửi gói spawn, hiển thị trạng thái chờ `0.0s` màu xanh lá cây sẵn sàng.
+- **Hỗ trợ nhấp đúp quái trong Game**:
+  - Nhấp 1 lần vào quái: Hiện con trỏ chỉ điểm (`paintFocus`) trên đầu quái.
+  - Nhấp đúp (Double-click): Nhân vật tự động khóa mục tiêu và lao vào tấn công quái ngay lập tức.
 
 ---
 
@@ -180,7 +205,44 @@ Hệ thống bao gồm 2 thành phần chính hoạt động song song và đồ
 
 ---
 
-## 7. CƠ CHẾ AN TOÀN BẢO VỆ TÀI KHOẢN (DUAL-LAYER SAFETY)
+## 7. TỰ ĐỘNG BÁN ĐỒ TỪ XA (REMOTE AUTO SELL & COIN HARVEST)
+
+### 7.1. Bối cảnh & Nguyên lý hoạt động
+- **Thực tế trong game**: Bình thường người chơi phải chạy bộ về Làng Sói Trắng, đối thoại với NPC Lisa, mở menu "Mua bán", click vào từng món trong túi đồ rồi chọn "Bán" và xác nhận. Khi train quái ở map xa, hành trang nhanh chóng đầy đồ rác (trắng, xanh), khiến người chơi mất rất nhiều thời gian di chuyển đi về.
+- **Nguyên lý mạng**: Trong kiến trúc game Hiệp Sĩ Online, gói tin bán đồ cho cửa hàng (`GlobalService.delete_Item`) sử dụng opcode `18` (`Cmd_Message.DEL_ITEM`):
+  ```java
+  GlobalService.gI().delete_Item((byte)item.ItemCatagory, (short)item.Id, (byte)1);
+  ```
+  - Tham số: `type` (`ItemCatagory`), `id` (`item.Id`), `typedelete = 1` (1 = bán cho shop để lấy vàng/xu, 0 = vứt bỏ/xóa đồ).
+  - **Khám phá quan trọng**: Máy chủ HSO xử lý gói tin opcode 18 độc lập, **không kiểm tra khoảng cách đối với NPC Lisa** và **không yêu cầu đang mở giao diện Shop**. Gói tin này lập tức bán trang bị, trừ khỏi hành trang và cộng tiền vàng (`GameScreen.player.coin`) cho nhân vật ngay tại vị trí người chơi đang đứng!
+
+### 7.2. Giao diện & Modal cấu hình Auto Bán Đồ
+- Nằm ngay dưới hàng Auto Loot trên Right Sidebar:
+  - **Nút Toggle**: `Auto Sell: OFF / ON` (bật/tắt tự động quét bán nền mỗi 3 giây).
+  - **Nút ⚙**: Mở Modal cấu hình chi tiết `CẤU HÌNH AUTO BÁN ĐỒ - THU VÀNG`.
+- **Thanh trạng thái thời gian thực trong Modal**:
+  - `🎒 Túi: {inven_count}/{inven_max} ô  |  💰 Vàng: {coin:,} xu`
+  - `Đang chọn bán: {match_count} món (Trang bị: {match_equip}, NL: {match_mat})`
+  - Cập nhật số liệu động mỗi 0.5s theo thời gian thực.
+- **Phân loại trang bị & màu sắc**:
+  - ⚪ Đồ Trắng (Thường)
+  - 🔵 Đồ Xanh (Đặc biệt)
+  - 🟡 Đồ Vàng (Hiếm)
+  - 🟣 Đồ Tím (Huyền bí)
+  - 🟠 Đồ Cam (Sử thi)
+  - 🟢 Đồ Xanh lá (Hoàn mỹ)
+- **Tùy chọn bảo vệ an toàn tuyệt đối**:
+  - 🔒 **Chỉ bán đồ +0 (`tier0_only = True`)**: Bảo vệ 100% trang bị đã cường hóa (+1, +2, +3,...), không bao giờ bán nhầm đồ đang nâng cấp.
+  - 🛡️ **Không bán đồ có khóa (`unlocked_only = True`)**: Không bao giờ bán trang bị hoặc vật phẩm có biểu tượng khóa bảo hiểm (`item.isLock > 0`).
+  - 🛡️ **Kiểm tra quyền bán (`canSell == 1`)**: Chỉ bán đồ được game cho phép bán cho thương nhân, bỏ qua đồ nhiệm vụ hay đồ không bán được.
+- **Nút thao tác nhanh**:
+  - `[ Đồ rác (Trắng+Xanh) ]`: Tự động tick chọn đồ trắng và xanh, bỏ chọn các phẩm cấp quý hơn.
+  - `[ 💰 BÁN NGAY ]`: Lập tức quét túi và gửi chuỗi gói tin bán toàn bộ các món đồ thỏa mãn bộ lọc hiện tại (mỗi món cách nhau 120ms an toàn) mà không cần bật Auto Sell liên tục.
+  - `[ LƯU CẤU HÌNH ]`: Lưu cấu hình và đồng bộ xuống client.
+
+---
+
+## 8. CƠ CHẾ AN TOÀN BẢO VỆ TÀI KHOẢN (DUAL-LAYER SAFETY)
 
 Để phòng tránh tuyệt đối nguy cơ bị người chơi khác quay clip tố cáo hoặc bị GM kiểm tra:
 
@@ -194,33 +256,37 @@ Hệ thống bao gồm 2 thành phần chính hoạt động song song và đồ
 2. **Cảnh báo Bot Captcha**:
    - Tự động nhận diện thực thể Bot Captcha chống auto (`typeBoss == 2`).
    - Phát cảnh báo khẩn cấp cả trên giao diện Tool lẫn trong game để người chơi can thiệp kịp thời.
-3. **Khóa chặt tự đánh nội tại (Auto Attack Lockout)**:
-   - Khi tắt Auto Attack (`isAutoAttack = false`), hàm `stopAllAutoAttack()` triệt tiêu toàn bộ:
-     - Biến cờ tự đánh nội tại của client (`Player.isAutoFire = -1`, `isCurAutoFire = false`).
-     - Reset phím đánh ảo (`keyMyPressed[25] = false`, `keyMyPressed[5] = false`).
-     - Hủy mục tiêu trỏ (`ObjFocus = null`, `KillFire = -1`, `IDAttack = -1`).
-     - Ngăn chặn hoàn toàn hiện tượng nhân vật tự ý vung kiếm chém bậy khi đang đứng cạnh quái.
+3. **Tương thích hoàn hảo giữa Thao tác thủ công và Auto (Manual Control & Lockout)**:
+   - **Thao tác thủ công (Click / Double Click trong Game)**:
+     - Khi người chơi click vào quái trong game: `GameScreen.ObjFocus` nhận mục tiêu và hiển thị con trỏ mũi tên trên đầu quái (`paintFocus`) bình thường.
+     - Khi double click vào quái: Client tự động kích hoạt `isCurAutoFire = true` và nạp phím đánh ảo để nhân vật tự động chiến đấu liên tục vào quái đó.
+   - **Khi tắt Auto Attack trên Tool (`stopAllAutoAttack`)**:
+     - Lệnh chỉ ngắt chu trình tự tìm quái một lần duy nhất tại thời điểm tắt; không can thiệp vòng lặp vĩnh viễn mỗi frame, cho phép người chơi tự do click quái và đánh tay bình thường.
+   - **Khi Auto Farm đang hoạt động (`isFarmAttackActive`)**:
+     - Tự động bỏ qua việc auto-search quái ngẫu nhiên khi `ObjFocus == null` để giữ vững vị trí và tập trung toàn lực vào các đòn đánh chớp nhoáng (Burst Loop) cho đàn quái đã chọn.
 4. **Giãn cách bật/tắt Đồ Sát (180 giây)**:
    - Nút Đồ Sát tích hợp bộ đếm lùi 180s thời gian thực, ngăn việc spam lệnh vi phạm quy định game.
 
 ---
 
-## 8. BẢNG PHÍM TẮT & LỆNH ĐIỀU KHIỂN
+## 9. BẢNG PHÍM TẮT & LỆNH ĐIỀU KHIỂN
 
-### 8.1. Điều khiển trên HSO Tool Studio:
+### 9.1. Điều khiển trên HSO Tool Studio:
 | Thao tác / Nút | Chức năng |
 | :--- | :--- |
 | **Auto Attack (BẬT/TẮT)** | Bật hoặc tắt chế độ tự động đánh |
 | **Nút ⚙ (cạnh Auto Attack)** | Mở hộp thoại cấu hình chọn quái cần Farm |
 | **Auto Loot (BẬT/TẮT)** | Bật hoặc tắt tính năng tự nhặt đồ rơi |
 | **Nút ⚙ (cạnh Auto Loot)** | Mở Modal cấu hình bộ lọc loại vật phẩm cần nhặt |
+| **Auto Sell (BẬT/TẮT)** | Bật hoặc tắt chế độ tự động bán đồ rác nền từ xa |
+| **Nút ⚙ (cạnh Auto Sell)** | Mở Modal cấu hình chọn loại đồ bán & nút "Bán ngay" |
 | **Đồ Sát (PK)** | Bật/tắt cờ đồ sát (kèm đếm ngược 180s) |
 | **Tốc độ (Speed)** | Tùy chỉnh tốc độ di chuyển: x1.0, x1.2, x1.4, x1.6, x1.8, x2.0 |
 | **Đổi Khu (Zone)** | Xem khu hiện tại và chuyển nhanh sang khu khác |
 | **Click quái trên Radar / Grid** | Ghim mục tiêu quái vật |
 | **Click người chơi trong Tab Player** | Ghim mục tiêu người chơi để PK từ xa |
 
-### 8.2. Phím tắt trong Game Client (MicroEmulator):
+### 9.2. Phím tắt trong Game Client (MicroEmulator):
 | Phím | Chức năng |
 | :--- | :--- |
 | **Phím 1 - 5** | Sử dụng kỹ năng tương ứng trên thanh Hotkey |

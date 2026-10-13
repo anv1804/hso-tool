@@ -1623,6 +1623,7 @@ extends AvMain {
             boolean bl = false;
             String string2 = msg.reader().readUTF();
             byte by = msg.reader().readByte();
+            com.silverknight.HsoBridge.logDebug("RECV npcInfo: title/chat='" + string2 + "', type/id=" + by);
             TabShopNew.isTabHopNL = false;
             if (by < 0) {
                 MainObject mainObject = MainObject.get_Object(by, (byte)2);
@@ -2609,11 +2610,30 @@ extends AvMain {
             byte by = msg.reader().readByte();
             int n = msg.reader().readByte();
             mVector mVector2 = new mVector("ReadMessenge cmd");
+            StringBuffer sbOpts = new StringBuffer();
+            int shopIndex = -1;
             for (int i = 0; i < n; ++i) {
-                iCommand iCommand2 = new iCommand(msg.reader().readUTF(), null);
+                String opt = msg.reader().readUTF();
+                if (i > 0) sbOpts.append(", ");
+                sbOpts.append(opt);
+                String optLower = opt.toLowerCase();
+                if (optLower.indexOf("mua bán") != -1 || optLower.indexOf("mua ban") != -1 || optLower.indexOf("cửa hàng") != -1 || optLower.indexOf("cua hang") != -1 || optLower.indexOf("shop") != -1) {
+                    shopIndex = i;
+                }
+                iCommand iCommand2 = new iCommand(opt, null);
                 mVector2.addElement(iCommand2);
             }
+            if (shopIndex == -1 && s == -3 && n > 0) {
+                shopIndex = 0;
+            }
             String string = msg.reader().readUTF();
+            com.silverknight.HsoBridge.logDebug("RECV Dynamic_Menu: title='" + string + "', idNPC=" + s + ", idMenu=" + by + ", opts=[" + sbOpts.toString() + "]");
+            if (com.silverknight.HsoBridge.isAutoOpeningShop && shopIndex >= 0) {
+                com.silverknight.HsoBridge.logDebug("Tự động chọn option index=" + shopIndex + " để mở Shop...");
+                GlobalService.gI().Dynamic_Menu(s, by, (byte)shopIndex);
+                GameCanvas.menu2.doCloseMenu();
+                return;
+            }
             GameCanvas.menu2.setinfoDynamic(mVector2, 2, by, s, string);
         }
         catch (Exception exception) {
@@ -4551,6 +4571,13 @@ extends AvMain {
             this.idDialog = msg.reader().readShort();
             this.typeDialog = msg.reader().readByte();
             String string = msg.reader().readUTF();
+            com.silverknight.HsoBridge.logDebug("RECV Dialog_server: '" + string + "' (id=" + this.idDialog + ", type=" + this.typeDialog + ")");
+            if (string != null && string.toLowerCase().indexOf("bạn có muốn bán") != -1) {
+                com.silverknight.HsoBridge.logDebug("Auto-confirming sell dialog: id=" + this.idDialog);
+                GlobalService.gI().dialog_Server(this.idDialog, this.typeDialog, (byte)1);
+                GameCanvas.end_Dialog();
+                return;
+            }
             mVector mVector2 = new mVector("ReadMessenge vec4");
             mVector2.addElement(new iCommand("Ok", 2, 1, (AvMain)this));
             mVector2.addElement(new iCommand(T.cancel, 2, 0, (AvMain)this));
@@ -5256,6 +5283,7 @@ extends AvMain {
         try {
             String string = msg.reader().readUTF();
             byte by = msg.reader().readByte();
+            com.silverknight.HsoBridge.logDebug("RECV InfoEasyFromServer: '" + string + "' (type=" + by + ")");
             if (by == 0) {
                 GameCanvas.addInfoChar(string);
             } else if (by == 1) {

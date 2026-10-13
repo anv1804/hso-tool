@@ -228,6 +228,8 @@ DEFAULT_CONFIG = {
     "speed": "1.0",
     "auto_attack": False,
     "auto_pickup": False,
+    "auto_sell": False,
+    "farm_sync": True,
     "monster_view_mode": "grid",
     "auto_loot_filter": {
         "white": True,
@@ -241,6 +243,17 @@ DEFAULT_CONFIG = {
         "gold": True,
         "material": True,
         "quest": True,
+    },
+    "auto_sell_filter": {
+        "white": True,
+        "blue": True,
+        "yellow": False,
+        "purple": False,
+        "orange": False,
+        "green": False,
+        "material": False,
+        "tier0_only": True,
+        "unlocked_only": True,
     }
 }
 
@@ -253,6 +266,8 @@ def load_config():
                 merged = {**DEFAULT_CONFIG, **loaded}
                 if "auto_loot_filter" in loaded and isinstance(loaded["auto_loot_filter"], dict):
                     merged["auto_loot_filter"] = {**DEFAULT_CONFIG["auto_loot_filter"], **loaded["auto_loot_filter"]}
+                if "auto_sell_filter" in loaded and isinstance(loaded["auto_sell_filter"], dict):
+                    merged["auto_sell_filter"] = {**DEFAULT_CONFIG["auto_sell_filter"], **loaded["auto_sell_filter"]}
                 return merged
         except Exception:
             pass
@@ -526,7 +541,9 @@ class HsoPanel(tk.Frame):
         if not self.tabs or len(self.tabs) < 2:
             return
         w = self.hdr_canvas.winfo_width()
-        idx = 0 if event.x < w // 2 else 1
+        n_tabs = len(self.tabs)
+        tab_w = w / n_tabs
+        idx = min(n_tabs - 1, max(0, int(event.x / tab_w)))
         if idx != self.active_tab_idx:
             self.active_tab_idx = idx
             self._redraw_header()
@@ -541,21 +558,19 @@ class HsoPanel(tk.Frame):
             return
 
         if self.tabs and len(self.tabs) >= 2:
-            mid = w // 2
-            # Tab 0 (Bên trái: MONSTER)
-            bg0 = "#381c10" if self.active_tab_idx == 0 else "#1c0b05"
-            fg0 = "#ffdf79" if self.active_tab_idx == 0 else "#96806e"
-            c.create_rectangle(0, 0, mid, 18, fill=bg0, outline="")
-            c.create_text(mid // 2, 9, text=self.tabs[0], fill=fg0, font=(FONT_FAMILY, 8), anchor="center")
-
-            # Tab 1 (Bên phải: PLAYER)
-            bg1 = "#381c10" if self.active_tab_idx == 1 else "#1c0b05"
-            fg1 = "#ffdf79" if self.active_tab_idx == 1 else "#96806e"
-            c.create_rectangle(mid, 0, w, 18, fill=bg1, outline="")
-            c.create_text(mid + (w - mid) // 2, 9, text=self.tabs[1], fill=fg1, font=(FONT_FAMILY, 8), anchor="center")
-
-            # Đường chia 2 tab
-            c.create_line(mid, 0, mid, 18, fill=COLOR_BORDER_GOLD)
+            n_tabs = len(self.tabs)
+            tab_w = w / n_tabs
+            for i, tab_title in enumerate(self.tabs):
+                x1 = int(i * tab_w)
+                x2 = int((i + 1) * tab_w) if i < n_tabs - 1 else w
+                is_act = (i == self.active_tab_idx)
+                bg = "#381c10" if is_act else "#1c0b05"
+                fg = "#ffdf79" if is_act else "#96806e"
+                c.create_rectangle(x1, 0, x2, 18, fill=bg, outline="")
+                c.create_text((x1 + x2) // 2, 9, text=tab_title, fill=fg,
+                              font=(FONT_FAMILY, 7 if n_tabs > 2 else 8), anchor="center")
+                if i > 0:
+                    c.create_line(x1, 0, x1, 18, fill=COLOR_BORDER_GOLD)
         else:
             c.create_rectangle(0, 0, w, 18, fill="#2c160c", outline="")
             ty = 9
@@ -762,8 +777,9 @@ class HsoStudioApp:
         self.build_center_content()
         self.clear_live_state()
 
-        # Vòng lặp cập nhật IPC
+        # Vòng lặp cập nhật IPC và đếm ngược hồi sinh mượt mà 0.1s
         self.poll_ipc_loop()
+        self.countdown_tick_loop()
 
         # Dọn dẹp tiến trình khi đóng app
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -973,11 +989,11 @@ class HsoStudioApp:
         )
         btn_v_vang.pack(side="left", padx=(3, 0))
 
-        # MONSTERS / PLAYERS DUAL TAB PANEL
+        # MONSTERS / PLAYERS / NPC TRIPLE TAB PANEL
         self.active_mon_tab = 0
         self.p_mon = HsoPanel(
             left_container,
-            tabs=["MONSTERS", "PLAYER (0)"],
+            tabs=["MON (0)", "PL (0)", "NPC (0)"],
             on_tab_change=self.on_mon_tab_change
         )
         self.p_mon.pack(fill="both", expand=True)
@@ -1227,6 +1243,55 @@ class HsoStudioApp:
         except OSError as e:
             self.log_msg("Không gửi được lệnh bộ lọc nhặt đồ: " + str(e))
 
+    def toggle_auto_sell(self):
+        cur = self.config.get("auto_sell", False)
+        new_val = not cur
+        self.config["auto_sell"] = new_val
+        save_config(self.config)
+
+        self.btn_auto_sell.set_selected(new_val)
+        self.btn_auto_sell.configure(gold_text=new_val)
+        self.btn_auto_sell.set_text(f"Auto Sell: {'ON' if new_val else 'OFF'}")
+        if hasattr(self, "btn_auto_sell_opt"):
+            self.btn_auto_sell_opt.set_selected(new_val)
+            self.btn_auto_sell_opt.configure(gold_text=new_val)
+
+        sell_filter = self.config.get("auto_sell_filter", DEFAULT_CONFIG["auto_sell_filter"])
+        cmd = {"action": "auto_sell", "enabled": new_val}
+        cmd.update(sell_filter)
+        try:
+            self.write_command(cmd)
+        except OSError as e:
+            self.log_msg("Không gửi được lệnh Auto Sell: " + str(e))
+        self.log_msg(f"Auto Sell: {'ON' if new_val else 'OFF'}")
+
+    def send_sell_filter_command(self):
+        sell_filter = self.config.get("auto_sell_filter", DEFAULT_CONFIG["auto_sell_filter"])
+        cmd = {"action": "sell_filter"}
+        cmd.update(sell_filter)
+        try:
+            self.write_command(cmd)
+        except OSError as e:
+            self.log_msg("Không gửi được lệnh bộ lọc bán đồ: " + str(e))
+
+    def send_sell_now_command(self):
+        sell_filter = self.config.get("auto_sell_filter", DEFAULT_CONFIG["auto_sell_filter"])
+        cmd = {"action": "sell_now"}
+        cmd.update(sell_filter)
+        try:
+            self.write_command(cmd)
+            self.log_msg("Đã gửi yêu cầu Bán Ngay các món đồ thỏa điều kiện!")
+        except OSError as e:
+            self.log_msg("Không gửi được lệnh Bán Ngay: " + str(e))
+
+    def send_sell_single_item(self, item_id, item_cat=3, item_name=""):
+        cmd = {"action": "sell_single_item", "id": item_id, "cat": item_cat}
+        try:
+            self.write_command(cmd)
+            self.log_msg(f"Đã gửi lệnh bán từng cái: {item_name} (ID: {item_id})")
+        except OSError as e:
+            self.log_msg("Không gửi được lệnh bán: " + str(e))
+
     # ==============================================================
     # ==============================================================
     # 4. RIGHT SIDEBAR (PLAYER INFO & CONTROLS)
@@ -1355,7 +1420,7 @@ class HsoStudioApp:
 
         # Hàng Auto Loot và Tùy chọn Lọc đồ (⚙)
         row_loot = tk.Frame(c_func, bg="#1e1109")
-        row_loot.pack(fill="x", pady=0)
+        row_loot.pack(fill="x", pady=(0, 3))
 
         is_pickup = self.config.get("auto_pickup", False)
         self.btn_auto_loot_opt = HsoButton(
@@ -1382,6 +1447,36 @@ class HsoStudioApp:
             command=self.toggle_auto_pickup
         )
         self.btn_auto_pickup.pack(side="left", fill="x", expand=True)
+
+        # Hàng Auto Bán Đồ và Tùy chọn Bán (⚙)
+        row_sell = tk.Frame(c_func, bg="#1e1109")
+        row_sell.pack(fill="x", pady=0)
+
+        is_sell = self.config.get("auto_sell", False)
+        self.btn_auto_sell_opt = HsoButton(
+            row_sell,
+            text="⚙",
+            font_size=10,
+            width=26,
+            height=23,
+            is_selected=is_sell,
+            gold_text=is_sell,
+            renderer=self.btn_renderer,
+            command=self.open_auto_sell_modal
+        )
+        self.btn_auto_sell_opt.pack(side="left", padx=(0, 2))
+
+        self.btn_auto_sell = HsoButton(
+            row_sell,
+            text=f"Auto Sell: {'ON' if is_sell else 'OFF'}",
+            font_size=8,
+            height=23,
+            is_selected=is_sell,
+            gold_text=is_sell,
+            renderer=self.btn_renderer,
+            command=self.toggle_auto_sell
+        )
+        self.btn_auto_sell.pack(side="left", fill="x", expand=True)
 
     def redraw_player_bars(self):
         c = self.canvas_player_bars
@@ -1465,13 +1560,19 @@ class HsoStudioApp:
                     except (OSError, KeyError) as e:
                         self.log_msg("Không ghim được quái: " + str(e))
                     return
-        else:
+        elif self.active_mon_tab == 1:
             for top, bottom, p_id, p_name in getattr(self, "player_rows", []):
                 if top <= y < bottom:
                     if p_id == self.state_data.get("pinned_player_id", -1):
                         self.unpin_target()
                         return
                     self.pin_player(p_id, p_name)
+                    return
+        elif self.active_mon_tab == 2:
+            for top, bottom, npc in getattr(self, "npc_rows", []):
+                if top <= y < bottom:
+                    nx, ny = npc.get("x", 0), npc.get("y", 0)
+                    self.log_msg(f"📍 NPC: {npc.get('name')} tại ({nx}, {ny})")
                     return
 
     def pin_player(self, player_id, player_name=""):
@@ -1608,13 +1709,15 @@ class HsoStudioApp:
         if hasattr(self, "btn_auto_farm_opt"):
             self.btn_auto_farm_opt.set_selected(is_configured)
             self.btn_auto_farm_opt.configure(gold_text=is_configured)
-        signature = (map_id, area, is_configured, tuple(ids if is_configured else ()))
+        farm_sync = self.config.get("farm_sync", True)
+        signature = (map_id, area, is_configured, farm_sync, tuple(ids if is_configured else ()))
         if not force and signature == self.last_farm_signature:
             return
         try:
             self.write_command({
                 "action": "farm_targets", "map_id": map_id, "area": area,
                 "configured": 1 if is_configured else 0,
+                "sync": 1 if farm_sync else 0,
                 "ids": ";".join(str(monster_id) for monster_id in ids) if is_configured else ""
             })
         except OSError as e:
@@ -1869,6 +1972,557 @@ class HsoStudioApp:
         )
         btn_save.pack(side="right")
 
+    def open_auto_sell_modal(self):
+        old_dialog = getattr(self, "auto_sell_dialog", None)
+        if old_dialog is not None and old_dialog.winfo_exists():
+            old_dialog.lift()
+            return
+
+        dlg = tk.Toplevel(self.root)
+        self.auto_sell_dialog = dlg
+        dlg.title("Ban Do Tu Xa & Cau Hinh Auto")
+        dlg.geometry("540x600")
+        dlg.minsize(480, 520)
+        dlg.configure(bg=COLOR_BG_DARK)
+        dlg.transient(self.root)
+        try:
+            dlg.grab_set()
+        except Exception:
+            pass
+
+        try:
+            x = self.root.winfo_x() + (self.root.winfo_width() - 540) // 2
+            y = self.root.winfo_y() + (self.root.winfo_height() - 600) // 2
+            dlg.geometry(f"+{max(10, x)}+{max(10, y)}")
+        except Exception:
+            pass
+
+        cur_filter = self.config.get("auto_sell_filter", {})
+        default_filter = DEFAULT_CONFIG["auto_sell_filter"]
+        filter_vars = {}
+        for k in default_filter:
+            filter_vars[k] = tk.BooleanVar(value=bool(cur_filter.get(k, default_filter[k])))
+
+        color_map = {
+            0: ("[Trắng]", "#ffffff"),
+            1: ("[Xanh]", "#5dade2"),
+            2: ("[Vàng]", "#f4d03f"),
+            3: ("[Tím]", "#bb8fce"),
+            4: ("[Cam]", "#eb984e"),
+            5: ("[Xanh lá]", "#58d68d")
+        }
+
+        def does_item_match_filter(it):
+            if not isinstance(it, dict):
+                return False
+            name = it.get("name", "")
+            is_locked = (it.get("lock", 0) > 0) or ("[Kho" in name) or ("[kho" in name)
+            if filter_vars["unlocked_only"].get() and is_locked:
+                return False
+
+            cat = it.get("cat", 0)
+            if cat == 3:  # Trang bị
+                if filter_vars["tier0_only"].get() and it.get("tier", 0) != 0:
+                    return False
+                color = it.get("color", 0)
+                color_keys = {0: "white", 1: "blue", 2: "yellow", 3: "purple", 4: "orange", 5: "green"}
+                k = color_keys.get(color)
+                return bool(k and filter_vars.get(k) and filter_vars[k].get())
+            elif cat == 7:  # Nguyên liệu
+                return bool(filter_vars.get("material") and filter_vars["material"].get())
+            return False
+
+        info_var = tk.StringVar(value="Túi: Đang tải...")
+        summary_var = tk.StringVar(value="Đang tính toán...")
+        list_info_var = tk.StringVar(value="Hành trang: Đang tải...")
+        last_inventory_hash = [""]
+
+        def update_summary():
+            inv = self.state_data.get("inventory", [])
+            p = self.state_data.get("player") or getattr(self, "cached_player", {}) or {}
+            coin = p.get("coin", 0)
+            inven_count = p.get("inven_count", len(inv))
+            inven_max = p.get("inven_max", 42)
+
+            match_count = 0
+            match_equip = 0
+            match_mat = 0
+
+            for it in inv:
+                if does_item_match_filter(it):
+                    match_count += 1
+                    if it.get("cat") == 3:
+                        match_equip += 1
+                    elif it.get("cat") == 7:
+                        match_mat += 1
+
+            info_var.set(f"Túi: {inven_count}/{inven_max} ô  |  Vàng: {coin:,} xu")
+            summary_var.set(f"Đang chọn bán: {match_count} món (Trang bị: {match_equip}, NL: {match_mat})")
+            list_info_var.set(f"Hành trang: {inven_count}/{inven_max} ô  |  Vàng: {coin:,} xu")
+
+        # Container tabs
+        tab_names = ["BANG DO BAN (HANH TRANG)", "BO LOC AUTO BAN"]
+
+        def on_tab_switch(idx):
+            if idx == 0:
+                frame_tab_config.pack_forget()
+                frame_tab_list.pack(fill="both", expand=True)
+                refresh_item_list()
+            else:
+                frame_tab_list.pack_forget()
+                frame_tab_config.pack(fill="both", expand=True)
+                update_summary()
+
+        panel = HsoPanel(dlg, tabs=tab_names, on_tab_change=on_tab_switch)
+        panel.pack(fill="both", expand=True, padx=4, pady=4)
+        body = panel.body
+
+        # ==============================================================
+        # TAB 0: BẢNG DANH SÁCH ĐỒ BÁN (HÀNH TRANG)
+        # ==============================================================
+        frame_tab_list = tk.Frame(body, bg="#1e1109")
+        frame_tab_list.pack(fill="both", expand=True)
+
+        top_list_bar = tk.Frame(frame_tab_list, bg="#1e1109")
+        top_list_bar.pack(fill="x", pady=(0, 4))
+
+        lbl_list_info = tk.Label(
+            top_list_bar,
+            textvariable=list_info_var,
+            font=(FONT_FAMILY, 8, "bold"),
+            fg="#2ecc71",
+            bg="#1e1109"
+        )
+        lbl_list_info.pack(side="left")
+
+        btn_refresh_list = HsoButton(
+            top_list_bar,
+            text="Làm mới",
+            font_size=7,
+            width=70,
+            height=20,
+            renderer=self.btn_renderer,
+            command=lambda: refresh_item_list()
+        )
+        btn_refresh_list.pack(side="right")
+
+        btn_sell_junk_top = HsoButton(
+            top_list_bar,
+            text="Bán rác lần lượt",
+            font_size=7,
+            width=110,
+            height=20,
+            gold_text=True,
+            renderer=self.btn_renderer,
+            command=lambda: on_sell_now()
+        )
+        btn_sell_junk_top.pack(side="right", padx=(0, 4))
+
+        # Tiêu đề cột
+        col_header = tk.Frame(frame_tab_list, bg="#2a160d", height=20)
+        col_header.pack(fill="x", pady=(0, 2))
+        tk.Label(col_header, text="  Tên vật phẩm", font=(FONT_FAMILY, 7, "bold"), fg=COLOR_TEXT_GOLD, bg="#2a160d").pack(side="left", padx=4)
+        tk.Label(col_header, text="Thao tác  ", font=(FONT_FAMILY, 7, "bold"), fg=COLOR_TEXT_GOLD, bg="#2a160d").pack(side="right", padx=8)
+        tk.Label(col_header, text="Trạng thái", font=(FONT_FAMILY, 7, "bold"), fg=COLOR_TEXT_GOLD, bg="#2a160d").pack(side="right", padx=16)
+        tk.Label(col_header, text="Cấp / Tier", font=(FONT_FAMILY, 7, "bold"), fg=COLOR_TEXT_GOLD, bg="#2a160d").pack(side="right", padx=16)
+
+        # Scrollable container cho danh sách đồ
+        list_container = tk.Frame(frame_tab_list, bg=COLOR_INNER_BG, bd=1, relief="solid")
+        list_container.pack(fill="both", expand=True)
+
+        canvas_list = tk.Canvas(list_container, bg=COLOR_INNER_BG, highlightthickness=0)
+        scrollbar_list = ttk.Scrollbar(list_container, orient="vertical", command=canvas_list.yview)
+        canvas_list.configure(yscrollcommand=scrollbar_list.set)
+        canvas_list.pack(side="left", fill="both", expand=True)
+        scrollbar_list.pack(side="right", fill="y")
+
+        items_frame = tk.Frame(canvas_list, bg=COLOR_INNER_BG)
+        window_items = canvas_list.create_window((0, 0), window=items_frame, anchor="nw")
+
+        def _on_frame_config(event):
+            canvas_list.configure(scrollregion=canvas_list.bbox("all"))
+        items_frame.bind("<Configure>", _on_frame_config)
+
+        def _on_canvas_config(event):
+            canvas_list.itemconfigure(window_items, width=event.width)
+        canvas_list.bind("<Configure>", _on_canvas_config)
+
+        def _on_mousewheel(event):
+            canvas_list.yview_scroll(int(-event.delta / 120), "units")
+        canvas_list.bind("<MouseWheel>", _on_mousewheel)
+        canvas_list.bind("<Button-4>", lambda e: canvas_list.yview_scroll(-1, "units"))
+        canvas_list.bind("<Button-5>", lambda e: canvas_list.yview_scroll(1, "units"))
+
+        lbl_tip = tk.Label(
+            frame_tab_list,
+            text="Lưu ý: Bán từng món tuần tự và chờ phản hồi từ máy chủ để tránh nghẽn lệnh.",
+            font=(FONT_FAMILY, 7),
+            fg=COLOR_TEXT_MUTED,
+            bg="#1e1109"
+        )
+        lbl_tip.pack(anchor="w", pady=(2, 0))
+
+        def refresh_item_list():
+            update_summary()
+            inv = self.state_data.get("inventory", [])
+
+            for child in items_frame.winfo_children():
+                child.destroy()
+
+            # Ưu tiên trang bị (cat == 3) lên đầu danh sách
+            tradeable_items = sorted(
+                [it for it in inv if isinstance(it, dict) and it.get("cat") in (3, 7)],
+                key=lambda x: (0 if x.get("cat") == 3 else 1, x.get("color", 0))
+            )
+
+            if not tradeable_items:
+                lbl_empty = tk.Label(
+                    items_frame,
+                    text="Không có trang bị nào trong hành trang.",
+                    font=(FONT_FAMILY, 8),
+                    fg=COLOR_TEXT_MUTED,
+                    bg=COLOR_INNER_BG
+                )
+                lbl_empty.pack(pady=20)
+                return
+
+            for idx, it in enumerate(tradeable_items):
+                item_id = it.get("id", 0)
+                item_cat = it.get("cat", 3)
+                item_name = it.get("name", f"Item #{item_id}")
+                color_idx = it.get("color", 0)
+                tier = it.get("tier", 0)
+                level = it.get("level", 0)
+                is_locked = (it.get("lock", 0) > 0) or ("[Kho" in item_name) or ("[kho" in item_name)
+                matches_filter = does_item_match_filter(it)
+
+                col_tag, col_hex = color_map.get(color_idx, ("[Khác]", "#ede8df"))
+
+                row_bg = "#25140b" if idx % 2 == 0 else "#1c0e07"
+                row_frame = tk.Frame(items_frame, bg=row_bg, height=28)
+                row_frame.pack(fill="x", padx=2, pady=1)
+
+                f_name = tk.Frame(row_frame, bg=row_bg)
+                f_name.pack(side="left", padx=4, fill="y")
+
+                lbl_col_tag = tk.Label(f_name, text=col_tag, font=(FONT_FAMILY, 7), fg=col_hex, bg=row_bg)
+                lbl_col_tag.pack(side="left", padx=(0, 2))
+
+                display_name = item_name
+                for tag in (" [Khoá]", " [Khóa]", "[Khoá]", "[Khóa]"):
+                    if display_name.endswith(tag):
+                        display_name = display_name[:-len(tag)].rstrip()
+                        break
+
+                lbl_it_name = tk.Label(f_name, text=display_name, font=(FONT_FAMILY, 8, "bold"), fg=col_hex, bg=row_bg, anchor="w")
+                lbl_it_name.pack(side="left")
+
+                if is_locked:
+                    lbl_lock_tag = tk.Label(f_name, text=" [Khoá]", font=(FONT_FAMILY, 7, "bold"), fg="#e74c3c", bg=row_bg)
+                    lbl_lock_tag.pack(side="left", padx=2)
+
+                def make_sell_handler(i_id, i_cat, i_name, locked):
+                    def do_sell():
+                        if locked:
+                            if not messagebox.askyesno("Xác nhận bán", f"Món đồ '{i_name}' đang có KHÓA BẢO HIỂM.\nBạn có chắc muốn bán không?"):
+                                return
+                        self.send_sell_single_item(i_id, i_cat, i_name)
+                    return do_sell
+
+                btn_sell_one = HsoButton(
+                    row_frame,
+                    text="Bán",
+                    font_size=7,
+                    width=46,
+                    height=18,
+                    gold_text=True,
+                    renderer=self.btn_renderer,
+                    command=make_sell_handler(item_id, item_cat, item_name, is_locked)
+                )
+                btn_sell_one.pack(side="right", padx=6, pady=3)
+
+                status_text = "[Sẽ bán]" if matches_filter else "[Giữ lại]"
+                status_color = "#2ecc71" if matches_filter else COLOR_TEXT_MUTED
+                lbl_status = tk.Label(row_frame, text=status_text, font=(FONT_FAMILY, 7), fg=status_color, bg=row_bg, width=10, anchor="e")
+                lbl_status.pack(side="right", padx=6)
+
+                tier_str = f"Lv.{level} (+{tier})" if tier > 0 else f"Lv.{level}"
+                lbl_tier = tk.Label(row_frame, text=tier_str, font=(FONT_FAMILY, 7), fg="#d5dbdb", bg=row_bg, width=10, anchor="e")
+                lbl_tier.pack(side="right", padx=6)
+
+        # ==============================================================
+        # TAB 1: CẤU HÌNH BỘ LỌC AUTO BÁN
+        # ==============================================================
+        frame_tab_config = tk.Frame(body, bg="#1e1109")
+
+        sub_frame_cfg = tk.Frame(frame_tab_config, bg="#1e1109")
+        sub_frame_cfg.pack(fill="x", pady=(0, 4))
+
+        tk.Label(
+            sub_frame_cfg,
+            text="Cấu hình bộ lọc tự động bán từ xa (thu tiền Vàng):",
+            font=(FONT_FAMILY, 8),
+            fg=COLOR_TEXT_GOLD,
+            bg="#1e1109"
+        ).pack(anchor="w")
+
+        lbl_info = tk.Label(
+            sub_frame_cfg,
+            textvariable=info_var,
+            font=(FONT_FAMILY, 7, "bold"),
+            fg="#2ecc71",
+            bg="#1e1109"
+        )
+        lbl_info.pack(anchor="w", pady=(2, 0))
+
+        lbl_summary = tk.Label(
+            sub_frame_cfg,
+            textvariable=summary_var,
+            font=(FONT_FAMILY, 7),
+            fg=COLOR_TEXT_MUTED,
+            bg="#1e1109"
+        )
+        lbl_summary.pack(anchor="w")
+
+        quick_bar = tk.Frame(frame_tab_config, bg="#1e1109")
+        quick_bar.pack(fill="x", pady=(0, 6))
+
+        def set_junk_only():
+            filter_vars["white"].set(True)
+            filter_vars["blue"].set(True)
+            filter_vars["yellow"].set(False)
+            filter_vars["purple"].set(False)
+            filter_vars["orange"].set(False)
+            filter_vars["green"].set(False)
+            filter_vars["material"].set(False)
+            update_summary()
+
+        def set_all_sell(val):
+            filter_vars["white"].set(val)
+            filter_vars["blue"].set(val)
+            filter_vars["yellow"].set(val)
+            filter_vars["purple"].set(val)
+            filter_vars["orange"].set(val)
+            filter_vars["green"].set(val)
+            filter_vars["material"].set(val)
+            update_summary()
+
+        btn_select_junk = HsoButton(
+            quick_bar,
+            text="Đồ rác (Trắng+Xanh)",
+            font_size=7,
+            width=110,
+            height=20,
+            renderer=self.btn_renderer,
+            command=set_junk_only
+        )
+        btn_select_junk.pack(side="left", padx=(0, 4))
+
+        btn_select_all = HsoButton(
+            quick_bar,
+            text="Chọn hết",
+            font_size=7,
+            width=65,
+            height=20,
+            renderer=self.btn_renderer,
+            command=lambda: set_all_sell(True)
+        )
+        btn_select_all.pack(side="left", padx=(0, 4))
+
+        btn_deselect_all = HsoButton(
+            quick_bar,
+            text="Bỏ hết",
+            font_size=7,
+            width=65,
+            height=20,
+            renderer=self.btn_renderer,
+            command=lambda: set_all_sell(False)
+        )
+        btn_deselect_all.pack(side="left")
+
+        content_box = tk.Frame(frame_tab_config, bg=COLOR_INNER_BG, bd=1, relief="solid")
+        content_box.pack(fill="both", expand=True, pady=(0, 6))
+
+        # SECTION 1: TRANG BỊ THEO MÀU
+        lbl_sec1 = tk.Label(
+            content_box,
+            text="  TRANG BỊ THEO PHẨM CẤP / MÀU  ",
+            font=(FONT_FAMILY, 8, "bold"),
+            fg=COLOR_TEXT_GOLD,
+            bg="#2a160d"
+        )
+        lbl_sec1.pack(fill="x", pady=(2, 2))
+
+        f_equip = tk.Frame(content_box, bg=COLOR_INNER_BG)
+        f_equip.pack(fill="x", padx=8, pady=2)
+
+        equip_items = [
+            ("white", "[Trắng] Thường", "#ede8df"),
+            ("blue", "[Xanh] Đặc biệt", "#5dade2"),
+            ("yellow", "[Vàng] Hiếm", "#f4d03f"),
+            ("purple", "[Tím] Huyền bí", "#bb8fce"),
+            ("orange", "[Cam] Sử thi", "#eb984e"),
+            ("green", "[Xanh lá] Hoàn mỹ", "#58d68d"),
+        ]
+        for idx, (key, text, col) in enumerate(equip_items):
+            r = idx // 2
+            c = idx % 2
+            cb = tk.Checkbutton(
+                f_equip,
+                text=text,
+                variable=filter_vars[key],
+                command=update_summary,
+                font=(FONT_FAMILY, 8),
+                bg=COLOR_INNER_BG,
+                fg=col,
+                selectcolor="#2a160d",
+                activebackground=COLOR_INNER_BG,
+                activeforeground=col,
+                bd=0,
+                highlightthickness=0
+            )
+            cb.grid(row=r, column=c, sticky="w", padx=4, pady=2)
+        f_equip.grid_columnconfigure(0, weight=1)
+        f_equip.grid_columnconfigure(1, weight=1)
+
+        # SECTION 2: BẢO VỆ AN TOÀN
+        lbl_sec2 = tk.Label(
+            content_box,
+            text="  TÙY CHỌN BẢO VỆ AN TOÀN  ",
+            font=(FONT_FAMILY, 8, "bold"),
+            fg=COLOR_TEXT_GOLD,
+            bg="#2a160d"
+        )
+        lbl_sec2.pack(fill="x", pady=(6, 2))
+
+        f_safe = tk.Frame(content_box, bg=COLOR_INNER_BG)
+        f_safe.pack(fill="x", padx=8, pady=2)
+
+        safe_items = [
+            ("tier0_only", "Chỉ bán trang bị +0 (Bảo vệ đồ cường hóa)", "#f39c12"),
+            ("unlocked_only", "Không bao giờ bán đồ có khóa bảo hiểm", "#e74c3c"),
+        ]
+        for key, text, col in safe_items:
+            cb = tk.Checkbutton(
+                f_safe,
+                text=text,
+                variable=filter_vars[key],
+                command=update_summary,
+                font=(FONT_FAMILY, 8),
+                bg=COLOR_INNER_BG,
+                fg=col,
+                selectcolor="#2a160d",
+                activebackground=COLOR_INNER_BG,
+                activeforeground=col,
+                bd=0,
+                highlightthickness=0
+            )
+            cb.pack(anchor="w", padx=4, pady=2)
+
+        # SECTION 3: NGUYÊN LIỆU
+        lbl_sec3 = tk.Label(
+            content_box,
+            text="  NGUYÊN LIỆU & VẬT PHẨM KHÁC  ",
+            font=(FONT_FAMILY, 8, "bold"),
+            fg=COLOR_TEXT_GOLD,
+            bg="#2a160d"
+        )
+        lbl_sec3.pack(fill="x", pady=(6, 2))
+
+        f_mat = tk.Frame(content_box, bg=COLOR_INNER_BG)
+        f_mat.pack(fill="x", padx=8, pady=2)
+
+        cb_mat = tk.Checkbutton(
+            f_mat,
+            text="Bán nguyên liệu thường (Category 7)",
+            variable=filter_vars["material"],
+            command=update_summary,
+            font=(FONT_FAMILY, 8),
+            bg=COLOR_INNER_BG,
+            fg="#a569bd",
+            selectcolor="#2a160d",
+            activebackground=COLOR_INNER_BG,
+            activeforeground="#a569bd",
+            bd=0,
+            highlightthickness=0
+        )
+        cb_mat.pack(anchor="w", padx=4, pady=2)
+
+        # Nạp dữ liệu lần đầu
+        refresh_item_list()
+
+        # Polling cập nhật thời gian thực khi dialog mở
+        def poll_live():
+            if not dlg.winfo_exists():
+                return
+            inv = self.state_data.get("inventory", [])
+            inv_hash = f"{len(inv)}_{sum(x.get('id', 0) for x in inv if isinstance(x, dict))}"
+            if inv_hash != last_inventory_hash[0]:
+                last_inventory_hash[0] = inv_hash
+                refresh_item_list()
+            dlg.after(600, poll_live)
+        poll_live()
+
+        # ==============================================================
+        # BOTTOM BAR
+        # ==============================================================
+        bottom_bar = tk.Frame(body, bg="#1e1109")
+        bottom_bar.pack(side="bottom", fill="x", pady=(4, 0))
+
+        def on_cancel():
+            dlg.destroy()
+
+        def on_sell_now():
+            new_filter = {k: bool(v.get()) for k, v in filter_vars.items()}
+            self.config["auto_sell_filter"] = new_filter
+            save_config(self.config)
+            self.send_sell_now_command()
+            self.log_msg("Đang tiến hành bán tuần tự từng món rác...")
+
+        def on_save():
+            new_filter = {k: bool(v.get()) for k, v in filter_vars.items()}
+            self.config["auto_sell_filter"] = new_filter
+            save_config(self.config)
+            self.send_sell_filter_command()
+            self.log_msg("Đã lưu cấu hình Auto Bán Đồ!")
+            dlg.destroy()
+
+        btn_cancel = HsoButton(
+            bottom_bar,
+            text="Đóng",
+            font_size=8,
+            width=60,
+            height=24,
+            renderer=self.btn_renderer,
+            command=on_cancel
+        )
+        btn_cancel.pack(side="left")
+
+        btn_sell_now = HsoButton(
+            bottom_bar,
+            text="Bán rác lần lượt",
+            font_size=8,
+            width=135,
+            height=24,
+            gold_text=True,
+            renderer=self.btn_renderer,
+            command=on_sell_now
+        )
+        btn_sell_now.pack(side="left", padx=(6, 0))
+
+        btn_save = HsoButton(
+            bottom_bar,
+            text="Lưu cấu hình",
+            font_size=8,
+            width=110,
+            height=24,
+            is_selected=True,
+            gold_text=True,
+            renderer=self.btn_renderer,
+            command=on_save
+        )
+        btn_save.pack(side="right")
+
     def open_auto_farm_modal(self):
         data = self.state_data
         if not data.get("in_game"):
@@ -1890,22 +2544,37 @@ class HsoStudioApp:
         dlg = tk.Toplevel(self.root)
         self.auto_farm_dialog = dlg
         dlg.title("Auto Fam")
-        dlg.geometry("365x430")
-        dlg.minsize(300, 320)
+        dlg.geometry("360x440")
+        dlg.minsize(330, 360)
         dlg.configure(bg=COLOR_BG_DARK)
         dlg.transient(self.root)
         dlg.grab_set()
 
+        try:
+            x = self.root.winfo_x() + (self.root.winfo_width() - 360) // 2
+            y = self.root.winfo_y() + (self.root.winfo_height() - 440) // 2
+            dlg.geometry(f"+{max(10, x)}+{max(10, y)}")
+        except Exception:
+            pass
+
         panel = HsoPanel(dlg, title="AUTO FAM - CHỌN QUÁI")
         panel.pack(fill="both", expand=True, padx=4, pady=4)
         body = panel.body
+
+        # DÒNG 1: THÔNG TIN MAP & TIẾN ĐỘ QUÉT (GỌN GÀNG, 22px)
+        header_top = tk.Frame(body, bg="#1a0c06", bd=1, relief="ridge")
+        header_top.pack(fill="x", pady=(0, 2), padx=1)
         title_var = tk.StringVar(value="")
         status_var = tk.StringVar(value="")
-        selected_count = tk.StringVar(value="")
-        tk.Label(body, textvariable=title_var, font=(FONT_FAMILY, 8),
-                 fg=COLOR_TEXT_GOLD, bg="#1e1109").pack(anchor="w", pady=(0, 3))
-        tk.Label(body, textvariable=status_var, font=(FONT_FAMILY, 7),
-                 fg=COLOR_TEXT_MUTED, bg="#1e1109").pack(anchor="w")
+        selected_count = tk.StringVar(value="Tất cả (0/0)")
+        tk.Label(header_top, textvariable=title_var, font=(FONT_FAMILY, 8, "bold"),
+                 fg=COLOR_TEXT_GOLD, bg="#1a0c06").pack(side="left", padx=5, pady=2)
+        tk.Label(header_top, textvariable=status_var, font=(FONT_FAMILY, 7),
+                 fg=COLOR_TEXT_MUTED, bg="#1a0c06").pack(side="right", padx=5, pady=2)
+
+        # DÒNG 2: THANH ĐIỀU KHIỂN & NÚT ĐỒNG BỘ FARM (24px)
+        ctrl_bar = tk.Frame(body, bg="#24120a", bd=1, relief="solid")
+        ctrl_bar.pack(fill="x", pady=(0, 3), padx=1)
 
         all_var = tk.BooleanVar(value=False)
         monster_vars = {}
@@ -1917,15 +2586,16 @@ class HsoStudioApp:
         health_canvases = {}
         roster_signature = None
         selection_touched = False
+        all_groups_expanded = True
 
         def refresh_checks():
             for name, members in groups.items():
-                chosen = sum(monster_vars[m["id"]].get() for m in members)
-                group_vars[name].set(chosen == len(members))
+                chosen = sum(monster_vars[m["id"]].get() for m in members if m["id"] in monster_vars)
+                group_vars[name].set(chosen == len(members) and len(members) > 0)
                 group_labels[name].set(f"{name} ({chosen}/{len(members)})")
             chosen_total = sum(var.get() for var in monster_vars.values())
             all_var.set(bool(monster_vars) and chosen_total == len(monster_vars))
-            selected_count.set(f"Đã chọn {chosen_total}/{len(monster_vars)} quái")
+            selected_count.set(f"Tất cả ({chosen_total}/{len(monster_vars)})")
 
         def set_all(value):
             nonlocal selection_touched
@@ -1934,15 +2604,54 @@ class HsoStudioApp:
                 var.set(value)
             refresh_checks()
 
-        tk.Checkbutton(body, text="Chọn tất cả quái trong map", variable=all_var,
-                       command=lambda: set_all(all_var.get()), font=(FONT_FAMILY, 8),
-                       bg="#1e1109", fg=COLOR_TEXT_GOLD, selectcolor=COLOR_INNER_BG,
-                       activebackground="#1e1109", activeforeground=COLOR_TEXT_GOLD).pack(anchor="w")
-        tk.Label(body, textvariable=selected_count, font=(FONT_FAMILY, 7),
-                 bg="#1e1109", fg=COLOR_TEXT_MUTED).pack(anchor="w", pady=(0, 4))
+        # Checkbox chọn tất cả quái
+        tk.Checkbutton(ctrl_bar, textvariable=selected_count, variable=all_var,
+                       command=lambda: set_all(all_var.get()), font=(FONT_FAMILY, 7, "bold"),
+                       bg="#24120a", fg=COLOR_TEXT_GOLD, selectcolor=COLOR_INNER_BG,
+                       activebackground="#24120a", activeforeground=COLOR_TEXT_GOLD).pack(side="left", padx=4, pady=1)
 
+        # NÚT ĐỒNG BỘ FARM (SYNC TOGGLE BUTTON)
+        def update_sync_btn():
+            is_sync = self.config.get("farm_sync", True)
+            if is_sync:
+                btn_sync.configure(text="🔄 ĐỒNG BỘ: BẬT")
+                btn_sync.set_selected(True)
+                btn_sync.gold_text = True
+            else:
+                btn_sync.configure(text="⚡ TỰ DO: RA LÀ HIT")
+                btn_sync.set_selected(False)
+                btn_sync.gold_text = False
+            btn_sync.redraw()
+
+        def toggle_sync_mode():
+            cur = self.config.get("farm_sync", True)
+            new_val = not cur
+            self.config["farm_sync"] = new_val
+            save_config(self.config)
+            update_sync_btn()
+            try:
+                self.write_command({"action": "farm_sync", "enabled": 1 if new_val else 0})
+            except Exception:
+                pass
+            self.sync_farm_targets(force=True)
+            self.log_msg(f"Auto Fam: Chế độ Đồng bộ -> {'BẬT (Đợi cả đàn hồi sinh để gom đánh)' if new_val else 'TẮT (Con nào ra trước hit ngay lập tức)'}")
+
+        btn_sync = HsoButton(
+            ctrl_bar,
+            text="🔄 ĐỒNG BỘ: BẬT",
+            font_size=7,
+            width=132,
+            height=20,
+            gold_text=True,
+            renderer=self.btn_renderer,
+            command=toggle_sync_mode
+        )
+        btn_sync.pack(side="right", padx=3, pady=2)
+        update_sync_btn()
+
+        # DANH SÁCH QUÁI (CANVAS SCROLLABLE)
         bottom = tk.Frame(body, bg="#1e1109")
-        bottom.pack(side="bottom", fill="x", pady=(5, 0))
+        bottom.pack(side="bottom", fill="x", pady=(3, 0))
         list_box = tk.Frame(body, bg=COLOR_INNER_BG)
         list_box.pack(fill="both", expand=True)
         canvas = tk.Canvas(list_box, bg=COLOR_INNER_BG, highlightthickness=0)
@@ -1963,28 +2672,44 @@ class HsoStudioApp:
             monster = monsters_by_id.get(monster_id)
             if bar is None or monster is None:
                 return
-            width = max(180, bar.winfo_width())
+            width = max(170, bar.winfo_width())
             hp = max(0, monster.get("hp", 0))
             max_hp = max(1, monster.get("maxHp", 1))
             fill = min(1.0, hp / max_hp)
             player = current_data.get("player", {})
             distance = int(((monster.get("x", 0) - player.get("x", 0)) ** 2 +
                             (monster.get("y", 0) - player.get("y", 0)) ** 2) ** 0.5)
-            bar_width = min(118, max(82, int(width * 0.43)))
-            left, right = width - bar_width - 3, width - 3
+            bar_width = min(96, max(70, int(width * 0.38)))
+            left, right = width - bar_width - 2, width - 2
             bar.delete("all")
-            bar.create_text(3, 8, text=f"#{monster_id} · {distance}px",
+            bar.create_text(2, 7, text=f"#{monster_id} · {distance}px",
                             fill=COLOR_TEXT_WHITE, font=(FONT_FAMILY, 7), anchor="w")
-            bar.create_rectangle(left, 2, right, 14, fill="#1c0b05", outline="#5a3118")
+            bar.create_rectangle(left, 2, right, 13, fill="#140703", outline="#4a2212")
             if fill > 0:
                 filled_right = left + 1 + int((bar_width - 2) * fill)
-                bar.create_rectangle(left + 1, 3, filled_right, 13,
+                bar.create_rectangle(left + 1, 3, filled_right, 12,
                                      fill=COLOR_HP_RED, outline="")
-                bar.create_line(left + 1, 4, filled_right, 4, fill="#ff7a7a")
-            bar.create_text((left + right) / 2 + 1, 9, text=f"{hp}/{max_hp}",
-                            fill="#000000", font=(FONT_FAMILY, 6))
-            bar.create_text((left + right) / 2, 8, text=f"{hp}/{max_hp}",
-                            fill="#ffffff", font=(FONT_FAMILY, 6))
+                bar.create_line(left + 1, 3, filled_right, 3, fill="#ff7373")
+                txt_hp = f"{hp}/{max_hp}"
+                txt_color = "#ffffff"
+            else:
+                death_time = monster.get("death_time", 0)
+                respawn_ms = monster.get("respawn_ms", 5000)
+                now_ms = time.time() * 1000
+                rem = max(0.0, (death_time + respawn_ms - now_ms) / 1000.0) if death_time > 0 else 0.0
+                if death_time > 0 and rem > 0:
+                    txt_hp = f"HS {rem:.1f}s"
+                    txt_color = "#ffe36e" if rem <= 1.0 else "#bfa15f"
+                elif death_time > 0:
+                    txt_hp = "0.0s"
+                    txt_color = "#77ff77"
+                else:
+                    txt_hp = "0"
+                    txt_color = "#777777"
+            bar.create_text((left + right) / 2 + 1, 8, text=txt_hp,
+                            fill="#000000", font=(FONT_FAMILY, 6, "bold"))
+            bar.create_text((left + right) / 2, 7, text=txt_hp,
+                            fill=txt_color, font=(FONT_FAMILY, 6, "bold"))
 
         def refresh_modal(current_data):
             nonlocal roster_signature, monsters_by_id, groups
@@ -1999,12 +2724,12 @@ class HsoStudioApp:
             progress = current_data.get("monster_scan_progress", 0)
             limit = current_data.get("monster_scan_limit", 512)
             if current_data.get("monster_scan_active"):
-                status_var.set(f"Đang hỏi ID quái: {progress}/{limit} · Server trả {len(current)}")
+                status_var.set(f"Quét: {progress}/{limit} · {len(current)} quái")
             elif current_data.get("monster_scan_done"):
-                status_var.set(f"Đã hỏi ID 0-{limit - 1} · Server trả {len(current)} quái")
+                status_var.set(f"Đã quét xong · {len(current)} quái")
             else:
-                status_var.set(f"Đang chuẩn bị quét · Hiện có {len(current)} quái")
-            title_var.set(f"{current_data.get('map_name', 'Map')} · Khu {area + 1}")
+                status_var.set(f"Sẵn sàng · {len(current)} quái")
+            title_var.set(f"🗺️ {current_data.get('map_name', 'Map')} · Khu {area + 1}")
             monsters_by_id = current
             if signature == roster_signature:
                 for monster_id in health_canvases:
@@ -2041,12 +2766,12 @@ class HsoStudioApp:
                     (m.get("x", 0) - px) ** 2 + (m.get("y", 0) - py) ** 2, m["id"]))
                 group_vars[name] = tk.BooleanVar(value=False)
                 group_labels[name] = tk.StringVar(value="")
-                group_expanded[name] = tk.BooleanVar(value=previous_expanded.get(name, False))
-                header = tk.Frame(items, bg="#382014")
-                header.pack(fill="x", pady=(3, 1))
+                group_expanded[name] = tk.BooleanVar(value=previous_expanded.get(name, True))
+                header = tk.Frame(items, bg="#2e170d", bd=1, relief="ridge")
+                header.pack(fill="x", pady=(2, 1))
                 children = tk.Frame(items, bg=COLOR_INNER_BG)
                 arrow = tk.Label(header, text="▼" if group_expanded[name].get() else "▶",
-                                 width=2, font=(FONT_FAMILY, 8), bg="#382014", fg=COLOR_TEXT_GOLD)
+                                 width=2, font=(FONT_FAMILY, 7), bg="#2e170d", fg=COLOR_TEXT_GOLD)
                 arrow.pack(side="left")
 
                 def toggle_expanded(group_name=name, group_children=children,
@@ -2069,9 +2794,9 @@ class HsoStudioApp:
                     refresh_checks()
 
                 tk.Checkbutton(header, textvariable=group_labels[name], variable=group_vars[name],
-                               command=toggle_group, font=(FONT_FAMILY, 8), anchor="w",
-                               bg="#382014", fg=COLOR_TEXT_GOLD, selectcolor=COLOR_INNER_BG,
-                               activebackground="#382014", activeforeground=COLOR_TEXT_GOLD).pack(
+                               command=toggle_group, font=(FONT_FAMILY, 7, "bold"), anchor="w",
+                               bg="#2e170d", fg=COLOR_TEXT_GOLD, selectcolor=COLOR_INNER_BG,
+                               activebackground="#2e170d", activeforeground=COLOR_TEXT_GOLD).pack(
                                    side="left", fill="x", expand=True)
                 for monster in members:
                     monster_id = monster["id"]
@@ -2082,14 +2807,14 @@ class HsoStudioApp:
                         selection_touched = True
                         refresh_checks()
                     row = tk.Frame(children, bg=COLOR_INNER_BG)
-                    row.pack(fill="x", padx=(12, 0))
+                    row.pack(fill="x", padx=(10, 0), pady=0)
                     tk.Checkbutton(row, text="", variable=monster_vars[monster_id],
                                    command=toggle_monster, width=2, padx=0,
                                    font=(FONT_FAMILY, 7), anchor="w", bg=COLOR_INNER_BG,
                                    fg=COLOR_TEXT_WHITE, selectcolor=COLOR_INNER_BG,
                                    activebackground=COLOR_INNER_BG,
                                    activeforeground=COLOR_TEXT_WHITE).pack(side="left")
-                    health_bar = tk.Canvas(row, height=16, bg=COLOR_INNER_BG,
+                    health_bar = tk.Canvas(row, height=15, bg=COLOR_INNER_BG,
                                            highlightthickness=0, bd=0, cursor="hand2")
                     health_bar.pack(side="left", fill="x", expand=True)
                     health_canvases[monster_id] = health_bar
@@ -2104,6 +2829,14 @@ class HsoStudioApp:
                     children.pack(fill="x")
             roster_signature = signature
             refresh_checks()
+
+        def toggle_all_groups():
+            nonlocal all_groups_expanded, roster_signature
+            all_groups_expanded = not all_groups_expanded
+            for name in group_expanded:
+                group_expanded[name].set(all_groups_expanded)
+            roster_signature = None
+            refresh_modal(self.state_data)
 
         def close_dialog():
             self.auto_farm_refresh = None
@@ -2167,24 +2900,29 @@ class HsoStudioApp:
                 self.log_msg(f"Đã tắt Auto Fam ở map {map_id} (chọn 0 quái).")
             close_dialog()
 
-        HsoButton(bottom, text="Tất cả", font_size=7, width=58, height=20,
-                  renderer=self.btn_renderer, command=lambda: set_all(True)).pack(side="left", padx=(0, 3))
-        HsoButton(bottom, text="Bỏ chọn", font_size=7, width=58, height=20,
-                  renderer=self.btn_renderer, command=lambda: set_all(False)).pack(side="left")
-        HsoButton(bottom, text="Đóng", font_size=7, width=48, height=20,
+        HsoButton(bottom, text="Tất cả", font_size=7, width=48, height=20,
+                  renderer=self.btn_renderer, command=lambda: set_all(True)).pack(side="left", padx=(0, 2))
+        HsoButton(bottom, text="Bỏ chọn", font_size=7, width=48, height=20,
+                  renderer=self.btn_renderer, command=lambda: set_all(False)).pack(side="left", padx=(0, 2))
+        HsoButton(bottom, text="Mở/Thu", font_size=7, width=48, height=20,
+                  renderer=self.btn_renderer, command=toggle_all_groups).pack(side="left")
+        HsoButton(bottom, text="Đóng", font_size=7, width=44, height=20,
                   renderer=self.btn_renderer, command=close_dialog).pack(side="right")
-        HsoButton(bottom, text="Lưu", font_size=7, width=48, height=20,
-                  gold_text=True, renderer=self.btn_renderer, command=save_farm).pack(side="right", padx=(0, 3))
+        HsoButton(bottom, text="Lưu", font_size=7, width=44, height=20,
+                  gold_text=True, renderer=self.btn_renderer, command=save_farm).pack(side="right", padx=(0, 2))
         dlg.protocol("WM_DELETE_WINDOW", close_dialog)
         self.auto_farm_refresh = refresh_modal
         refresh_modal(data)
 
     def refresh_mon_panel(self):
-        if getattr(self, "active_mon_tab", 0) == 0:
+        tab = getattr(self, "active_mon_tab", 0)
+        if tab == 0:
             monsters = self.state_data.get("map_monsters") or self.state_data.get("monsters", [])
             self.render_monster_grid(monsters)
-        else:
+        elif tab == 1:
             self.render_players_list(self.state_data.get("players", []))
+        else:
+            self.render_npcs_list(self.state_data.get("npcs", []))
 
     def render_players_list(self, players):
         c = self.canvas_mon
@@ -2303,6 +3041,77 @@ class HsoStudioApp:
 
         c.configure(scrollregion=(0, 0, cw, y_offset + 4))
 
+    def render_npcs_list(self, npcs):
+        c = self.canvas_mon
+        c.delete("all")
+        self.npc_rows = []
+
+        cw = c.winfo_width()
+        if cw < 30:
+            cw = 136
+
+        if not npcs:
+            c.create_text(
+                cw // 2, 30,
+                text="Không có NPC nào trong map",
+                fill=COLOR_TEXT_MUTED,
+                font=(FONT_FAMILY, 7),
+                justify="center",
+                anchor="center"
+            )
+            c.configure(scrollregion=(0, 0, cw, 60))
+            return
+
+        item_h = 22
+        pad_y = 2
+        y_offset = 1
+
+        me = self.state_data.get("player", {})
+        mx, my = me.get("x", 0), me.get("y", 0)
+        # Sắp xếp NPC theo khoảng cách gần nhất
+        npcs_sorted = sorted(npcs, key=lambda n: math.hypot(n.get("x", 0) - mx, n.get("y", 0) - my))
+
+        for npc in npcs_sorted:
+            n_id = npc.get("id", 0)
+            n_name = npc.get("name", "NPC")
+            nx, ny = npc.get("x", 0), npc.get("y", 0)
+            dist = int(math.hypot(nx - mx, ny - my))
+
+            # Nền hàng
+            c.create_rectangle(
+                2, y_offset, cw - 2, y_offset + item_h,
+                fill="#161009", outline="#3d2617", width=1
+            )
+            # Biểu tượng NPC cyan nhỏ
+            c.create_rectangle(
+                6, y_offset + 6, 14, y_offset + 14,
+                fill="#0abde3", outline="#ffffff"
+            )
+            # Tên NPC
+            txt_name = f"{n_name}"
+            if len(txt_name) > 13:
+                txt_name = txt_name[:13] + ".."
+            c.create_text(
+                18, y_offset + item_h // 2,
+                text=txt_name,
+                fill="#e8d5b5",
+                font=(FONT_FAMILY, 7, "bold"),
+                anchor="w"
+            )
+            # Cự ly
+            c.create_text(
+                cw - 6, y_offset + item_h // 2,
+                text=f"{dist}px",
+                fill="#8f8073",
+                font=(FONT_FAMILY, 6),
+                anchor="e"
+            )
+
+            self.npc_rows.append((y_offset, y_offset + item_h + pad_y, npc))
+            y_offset += item_h + pad_y
+
+        c.configure(scrollregion=(0, 0, cw, max(y_offset + 4, 60)))
+
     def render_monster_hp_bars(self, monsters):
         c = self.canvas_mon
         c.delete("all")
@@ -2380,6 +3189,8 @@ class HsoStudioApp:
             rem = max(0.0, (death_time + respawn_ms - now_ms) / 1000.0) if death_time > 0 else 0.0
             if hp <= 0 and death_time > 0 and rem > 0:
                 hp_str = f"HS {rem:.1f}s"
+            elif hp <= 0 and death_time > 0:
+                hp_str = "HS 0.0s"
             else:
                 hp_str = f"{hp}/{max_hp}"
             mid_x = bx1 + bar_w // 2
@@ -2505,7 +3316,10 @@ class HsoStudioApp:
                 rem = max(0.0, (death_time + respawn_ms - now_ms) / 1000.0) if death_time > 0 else 0.0
                 if death_time > 0 and rem > 0:
                     hp_txt = f"{rem:.1f}s"
-                    txt_fg = "#ffe36e" if rem <= 0.6 else "#bfa15f"
+                    txt_fg = "#ffe36e" if rem <= 1.0 else "#bfa15f"
+                elif death_time > 0:
+                    hp_txt = "0.0s"
+                    txt_fg = "#77ff77"
                 else:
                     hp_txt = "0"
                     txt_fg = "#777777"
@@ -2558,6 +3372,8 @@ class HsoStudioApp:
         self.radar_canvas = tk.Canvas(c_radar, bg="#0d0704", highlightthickness=0)
         self.radar_canvas.pack(fill="both", expand=True)
         self.radar_canvas.bind("<Configure>", lambda e: self.redraw_radar())
+        self.radar_canvas.bind("<Motion>", self.on_radar_hover)
+        self.radar_canvas.bind("<Leave>", self.on_radar_leave)
 
         self.log_msg("Ready.")
 
@@ -2960,8 +3776,10 @@ class HsoStudioApp:
             self.btn_pk.set_selected(False)
             self.btn_pk.configure(gold_text=False)
             self.btn_pk.set_disabled(False)
-        self.p_char.set_title("Offline")
-        self.p_mon.set_tab_title(1, "PLAYER (0)")
+        if hasattr(self, "p_mon"):
+            self.p_mon.set_tab_title(0, "MON (0)")
+            self.p_mon.set_tab_title(1, "PL (0)")
+            self.p_mon.set_tab_title(2, "NPC (0)")
         self.redraw_player_bars()
         self.refresh_mon_panel()
         self.redraw_radar()
@@ -3000,7 +3818,24 @@ class HsoStudioApp:
             except (OSError, ValueError):
                 pass
 
-        self.root.after(400, self.poll_ipc_loop)
+        self.root.after(200, self.poll_ipc_loop)
+
+    def countdown_tick_loop(self):
+        try:
+            if self.game_proc and getattr(self, "state_data", None):
+                monsters = self.state_data.get("map_monsters") or self.state_data.get("monsters", [])
+                has_dead = any(m.get("hp", 0) <= 0 and m.get("death_time", 0) > 0 for m in monsters)
+                if has_dead:
+                    if getattr(self, "active_mon_tab", 0) == 0:
+                        self.refresh_mon_panel()
+                    if getattr(self, "auto_farm_refresh", None):
+                        try:
+                            self.auto_farm_refresh(self.state_data)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+        self.root.after(100, self.countdown_tick_loop)
 
     def update_live_data(self, data):
         self.state_data = data
@@ -3211,6 +4046,17 @@ class HsoStudioApp:
                         self.btn_auto_loot_opt.set_selected(is_pkp)
                         self.btn_auto_loot_opt.configure(gold_text=is_pkp)
 
+            if "auto_sell" in data and hasattr(self, "btn_auto_sell"):
+                is_as = bool(data["auto_sell"])
+                if is_as != self.config.get("auto_sell", False):
+                    self.config["auto_sell"] = is_as
+                    self.btn_auto_sell.set_selected(is_as)
+                    self.btn_auto_sell.configure(gold_text=is_as)
+                    self.btn_auto_sell.set_text(f"Auto Sell: {'ON' if is_as else 'OFF'}")
+                    if hasattr(self, "btn_auto_sell_opt"):
+                        self.btn_auto_sell_opt.set_selected(is_as)
+                        self.btn_auto_sell_opt.configure(gold_text=is_as)
+
             if "speed" in data and hasattr(self, "update_speed_ui"):
                 try:
                     live_spd = f"{float(data['speed']):.1f}"
@@ -3221,10 +4067,12 @@ class HsoStudioApp:
                     pass
 
             p_count = data.get("players_count", len(players))
+            npc_count = len(data.get("npcs", []))
             if hasattr(self, "p_mon"):
                 m_all = data.get("map_monsters") or data.get("monsters", [])
-                self.p_mon.set_tab_title(0, f"MONSTERS ({len(m_all)})")
-                self.p_mon.set_tab_title(1, f"PLAYER ({p_count})")
+                self.p_mon.set_tab_title(0, f"MON ({len(m_all)})")
+                self.p_mon.set_tab_title(1, f"PL ({p_count})")
+                self.p_mon.set_tab_title(2, f"NPC ({npc_count})")
 
             self.refresh_mon_panel()
             self.redraw_radar()
@@ -3303,6 +4151,8 @@ class HsoStudioApp:
         pinned_id = data.get("pinned_monster_id", -1)
         focus_id = data.get("focus_monster_id", -1)
         now_ms = time.time() * 1000
+        self.radar_hover_items = []
+
         for monster in monsters:
             x, y = position(monster)
             hp = monster.get("hp", 0)
@@ -3322,21 +4172,34 @@ class HsoStudioApp:
                 # Quái sống: luôn là màu đỏ thuần
                 c.create_oval(x - 2, y - 2, x + 2, y + 2,
                               fill=COLOR_HP_RED, outline="")
+            m_name = monster.get("name", "Quái")
+            m_id = monster.get("id", 0)
+            self.radar_hover_items.append((x, y, f"[Quái] #{m_id} {m_name} ({hp} HP)", COLOR_HP_RED))
 
         for waypoint in data.get("waypoints", []):
             x, y = position(waypoint)
             c.create_polygon(x, y - 5, x + 4, y, x, y + 5, x - 4, y,
                              fill="#b58cff", outline="#ffffff")
+            wp_name = waypoint.get("name", "Cổng")
+            self.radar_hover_items.append((x, y, f"[Cổng] {wp_name}", "#b58cff"))
 
         for npc in data.get("npcs", []):
             kind = classify_radar_npc(npc.get("name"))
             x, y = position(npc)
+            npc_name = npc.get("name", "NPC")
             if kind == "zone":
                 c.create_polygon(x, y - 6, x + 5, y + 4, x - 5, y + 4,
                                  fill="#ff9b45", outline="#ffffff")
+                self.radar_hover_items.append((x, y, f"[Khu] {npc_name}", "#ff9b45"))
             elif kind == "stone":
                 c.create_polygon(x, y - 6, x + 5, y, x, y + 6, x - 5, y,
                                  fill="#60dfff", outline="#ffffff")
+                self.radar_hover_items.append((x, y, f"[Đá] {npc_name}", "#60dfff"))
+            else:
+                # NPC nhân vật / chức năng (Aman, Lisa, Hammer, Doubar, Zoro, v.v.)
+                c.create_rectangle(x - 3, y - 3, x + 3, y + 3,
+                                   fill="#0abde3", outline="#ffffff")
+                self.radar_hover_items.append((x, y, f"[NPC] {npc_name}", "#0abde3"))
 
         pinned_pl_id = data.get("pinned_player_id", -1)
         for other in data.get("players", []):
@@ -3348,27 +4211,65 @@ class HsoStudioApp:
             else:
                 c.create_oval(x - 3, y - 3, x + 3, y + 3,
                               fill="#ffd700", outline="#ffffff")
+            p_name = other.get("name", "Người chơi")
+            p_lv = other.get("lv", 0)
+            self.radar_hover_items.append((x, y, f"[Người] {p_name} (Lv {p_lv})", "#ffd700"))
 
         px, py = position(player)
         c.create_oval(px - 4, py - 4, px + 4, py + 4,
                       fill=COLOR_ONLINE, outline="#ffffff", width=1)
+        my_name = player.get("name", "Tôi")
+        my_lv = player.get("lv", 0)
+        self.radar_hover_items.append((px, py, f"[Bạn] {my_name} (Lv {my_lv})", COLOR_ONLINE))
+
         legend_items = [
             ("● Quái", COLOR_HP_RED),
             ("● Chết", "#666666"),
             ("◆ Cổng", "#b58cff"),
             ("▲ Khu", "#ff9b45"),
             ("◆ Đá", "#60dfff"),
+            ("■ NPC", "#0abde3"),
             ("● Người", "#ffd700"),
             ("● Bạn", COLOR_ONLINE)
         ]
         ly = max(bottom + 4, h - 11)
-        pad = 16
+        pad = 12
         n_items = len(legend_items)
         step = (w - 2 * pad) / max(1, n_items - 1)
         for idx, (label, color) in enumerate(legend_items):
             lx = pad + idx * step
             c.create_text(lx, ly, text=label, fill=color,
-                          font=(FONT_FAMILY, 7), anchor="center")
+                          font=(FONT_FAMILY, 6, "bold"), anchor="center")
+
+    def on_radar_hover(self, event):
+        c = self.radar_canvas
+        c.delete("radar_tooltip")
+        if not getattr(self, "radar_hover_items", None):
+            return
+        mx, my = event.x, event.y
+        closest = None
+        min_dist = 12.0
+        for x, y, text, color in self.radar_hover_items:
+            dist = math.hypot(x - mx, y - my)
+            if dist < min_dist:
+                min_dist = dist
+                closest = (x, y, text, color)
+        if closest:
+            x, y, text, color = closest
+            # Vẽ vòng tròn highlight quanh điểm được rê chuột
+            c.create_oval(x - 6, y - 6, x + 6, y + 6, outline=color, width=1.5, tags="radar_tooltip")
+            w = c.winfo_width()
+            box_w = max(50, len(text) * 5 + 12)
+            tx = max(4, min(w - box_w - 4, x + 8))
+            ty = max(4, y - 14)
+            # Nền chữ tooltip
+            c.create_rectangle(tx, ty, tx + box_w, ty + 14,
+                               fill="#160c06", outline=color, width=1, tags="radar_tooltip")
+            c.create_text(tx + 4, ty + 7, text=text, fill="#ffffff",
+                          font=(FONT_FAMILY, 6, "bold"), anchor="w", tags="radar_tooltip")
+
+    def on_radar_leave(self, event):
+        self.radar_canvas.delete("radar_tooltip")
 
 
 def main():

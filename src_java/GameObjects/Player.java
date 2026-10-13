@@ -495,9 +495,7 @@ extends MainObject {
         if (autoItem != null && GameCanvas.gameTick % 5 == 0) {
             this.autoGetItem();
         }
-        if (com.silverknight.HsoBridge.isAutoAttack
-                && !com.silverknight.HsoBridge.isFarmAttackActive()
-                && !com.silverknight.HsoBridge.isFarmConfigured()
+        if (!com.silverknight.HsoBridge.isFarmAttackActive()
                 && isAutoFire == 1 && this.posTransRoad == null) {
             if (PointSucKhoe <= 0) {
                 isAutoFire = 0;
@@ -513,7 +511,7 @@ extends MainObject {
                     this.dofire();
                 }
             }
-            if (!com.silverknight.HsoBridge.isAutoAttack && this.Action != 2 && this.Action != 4 && (MainObject.getDistance(this.x, this.y, xBeginAutoFire, yBeginAutofire) > this.wFocus * 3 / 2 || demUnFire > 100)) {
+            if (this.Action != 2 && this.Action != 4 && (MainObject.getDistance(this.x, this.y, xBeginAutoFire, yBeginAutofire) > this.wFocus * 3 / 2 || demUnFire > 100)) {
                 this.toX = this.x;
                 this.toY = this.y;
                 this.xStopMove = xBeginAutoFire;
@@ -545,7 +543,7 @@ extends MainObject {
             isFocusNPC = true;
             timeFocusNPC = 0;
         }
-        if (com.silverknight.HsoBridge.isAutoAttack && isAutoFire == 1 && GameScreen.ObjFocus != null && MainObject.getDistance(xBeginAutoFire, yBeginAutofire, GameScreen.ObjFocus.x, GameScreen.ObjFocus.y) > 240) {
+        if (isAutoFire == 1 && GameScreen.ObjFocus != null && MainObject.getDistance(xBeginAutoFire, yBeginAutofire, GameScreen.ObjFocus.x, GameScreen.ObjFocus.y) > 240) {
             this.nextMonster();
         }
     }
@@ -621,12 +619,7 @@ extends MainObject {
     public void setAutoFire() {
         Object object;
         int n;
-        if (!com.silverknight.HsoBridge.isAutoAttack) {
-            isAutoFire = (byte)-1;
-            isCurAutoFire = false;
-            return;
-        }
-        if ((com.silverknight.HsoBridge.isFarmAttackActive() || com.silverknight.HsoBridge.isFarmConfigured()) && com.silverknight.HsoBridge.pinnedMonsterId == -1) return;
+        if (com.silverknight.HsoBridge.isFarmAttackActive() && com.silverknight.HsoBridge.pinnedMonsterId == -1) return;
         if (com.silverknight.HsoBridge.pinnedMonsterId != -1) return;
         if (!ListSkill.canAttack()) {
             return;
@@ -827,10 +820,6 @@ extends MainObject {
 
     public void setFocus() {
         if (com.silverknight.HsoBridge.restorePinnedFocus()) return;
-        if (com.silverknight.HsoBridge.isFarmAttackActive() || com.silverknight.HsoBridge.isFarmConfigured()) {
-            GameScreen.ObjFocus = null;
-            return;
-        }
         if (isAutoFire == 1) {
             return;
         }
@@ -850,6 +839,9 @@ extends MainObject {
             }
         }
         if (GameScreen.ObjFocus == null && com.silverknight.HsoBridge.pinnedMonsterId == -1 && com.silverknight.HsoBridge.pinnedPlayerId == -1) {
+            if (com.silverknight.HsoBridge.isFarmAttackActive()) {
+                return;
+            }
             int n;
             if (GameScreen.gI().center != null) {
                 GameScreen.gI().center = null;
@@ -1066,7 +1058,7 @@ extends MainObject {
                 }
             }
         }
-        if (com.silverknight.HsoBridge.isFarmAttackActive() || com.silverknight.HsoBridge.isFarmConfigured()) {
+        if (com.silverknight.HsoBridge.isFarmAttackActive() && com.silverknight.HsoBridge.pinnedMonsterId == -1 && com.silverknight.HsoBridge.pinnedPlayerId == -1) {
             if (hotKey != null && hotKey.type == HotKey.SKILL) {
                 return;
             }
@@ -1163,7 +1155,7 @@ extends MainObject {
         mVector2.addElement(object_Effect_Skill);
         this.ListKillNow.setFireSkill(this, mVector2, id, (byte)-1);
         timeFristSkill = System.currentTimeMillis();
-        if (com.silverknight.HsoBridge.isAutoAttack && GameScreen.ObjFocus.typeObject == 1 && isAutoFire == 0) {
+        if (GameScreen.ObjFocus.typeObject == 1 && isAutoFire == 0) {
             isAutoFire = 1;
             isCurAutoFire = true;
             xBeginAutoFire = this.x;
@@ -1403,17 +1395,17 @@ extends MainObject {
     }
 
     public void dofire() {
-        if (!com.silverknight.HsoBridge.isAutoAttack || com.silverknight.HsoBridge.isFarmAttackActive() || com.silverknight.HsoBridge.isFarmConfigured()) {
-            isAutoFire = (byte)-1;
-            isCurAutoFire = false;
+        if (com.silverknight.HsoBridge.isFarmAttackActive()) {
             return;
         }
-        if (isAutoFire == 0) {
+        if (isAutoFire == 0 || (isAutoFire == 1 && !isCurAutoFire)) {
             isAutoFire = 1;
             xBeginAutoFire = this.x;
             yBeginAutofire = this.y;
             timeResetAuto = 60;
             isCurAutoFire = true;
+            GameCanvas.keyMyPressed[25] = true;
+            GameCanvas.keyMyPressed[5] = true;
         } else if (isAutoFire == -1) {
             GameCanvas.keyMyPressed[25] = true;
             GameCanvas.keyMyPressed[5] = true;
@@ -1426,9 +1418,7 @@ extends MainObject {
     }
 
     public void dofire_() {
-        if (!com.silverknight.HsoBridge.isAutoAttack || com.silverknight.HsoBridge.isFarmAttackActive() || com.silverknight.HsoBridge.isFarmConfigured()) {
-            isAutoFire = (byte)-1;
-            isCurAutoFire = false;
+        if (com.silverknight.HsoBridge.isFarmAttackActive()) {
             return;
         }
         isAutoFire = 1;

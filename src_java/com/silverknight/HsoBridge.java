@@ -5,7 +5,10 @@ import GameScreen.PaintInfoGameScreen;
 import GameObjects.MainObject;
 import GameObjects.MainMonster;
 import GameObjects.Player;
+import GameObjects.Item;
 import GameObjects.Object_Effect_Skill;
+import GameObjects.NPC;
+import GameObjects.NPCserver;
 import Main.GameCanvas;
 import Thread_More.LoadMap;
 import CLib.mVector;
@@ -46,6 +49,19 @@ public class HsoBridge {
     public static boolean lootGold = true;
     public static boolean lootMaterial = true;
     public static boolean lootQuest = true;
+    public static boolean isAutoSell = false;
+    public static boolean sellWhite = true;
+    public static boolean sellBlue = true;
+    public static boolean sellYellow = false;
+    public static boolean sellPurple = false;
+    public static boolean sellOrange = false;
+    public static boolean sellGreen = false;
+    public static boolean sellMaterial = false;
+    public static boolean sellTier0Only = true;
+    public static boolean sellUnlockedOnly = true;
+    public static volatile boolean isAutoOpeningShop = false;
+    private static volatile boolean isSelling = false;
+    private static long lastAutoSellCheckTime = 0L;
     public static boolean isAutoAttack = false;
     public static boolean pendingMinArea = false;
     public static boolean isSilentRequestArea = false;
@@ -58,6 +74,7 @@ public class HsoBridge {
     private static volatile int farmMapId = -1;
     private static volatile int farmArea = -1;
     private static volatile int[] farmTargetIds = new int[0];
+    private static volatile boolean farmSyncMode = true;
     private static long lastFarmAttemptTime = 0;
     private static volatile int farmPacketsSent = 0;
     private static volatile int farmDamageResults = 0;
@@ -193,6 +210,16 @@ public class HsoBridge {
                             obj.isSend = false;
                         }
                     }
+                }
+            }
+        }
+
+        // Tự động bán đồ rác nếu bật Auto Sell (chỉ khi ở màn hình game và không mở dialog)
+        if (isAutoSell && GameCanvas.currentScreen == GameCanvas.game && GameScreen.player != null) {
+            if (now - lastAutoSellCheckTime >= 3000L && !isSelling) {
+                lastAutoSellCheckTime = now;
+                if (GameCanvas.currentDialog == null) {
+                    sellMatchingItems();
                 }
             }
         }
@@ -358,15 +385,6 @@ public class HsoBridge {
                     }
                 }
             }
-        } else if (!isAutoAttack) {
-            Player.isAutoFire = (byte)-1;
-            Player.isCurAutoFire = false;
-            GameCanvas.keyMyPressed[25] = false;
-            GameCanvas.keyMyPressed[5] = false;
-            if (GameScreen.player != null) {
-                GameScreen.player.KillFire = -1;
-                GameScreen.player.IDAttack = -1;
-            }
         }
 
         // Bỏ trạng thái khu của map cũ trước khi xử lý yêu cầu chọn khu.
@@ -493,7 +511,7 @@ public class HsoBridge {
         record.y = obj.y;
         if (obj instanceof MainMonster) {
             int t = ((MainMonster)obj).timeReveice;
-            if (t > 0) {
+            if (t > 0 && t < 120) {
                 record.respawnSeconds = t;
                 record.respawnIntervalMs = (long)t * 1000L;
             }
@@ -505,15 +523,15 @@ public class HsoBridge {
                 record.preemptiveFired = false;
             }
         } else {
-            if (record.hp <= 0 && record.deathTime > 0L) {
-                long measured = System.currentTimeMillis() - record.deathTime;
-                if (measured > 1500L && measured < 60000L) {
-                    record.respawnIntervalMs = measured;
-                }
-                record.deathTime = 0L;
-                record.preemptiveFired = false;
+            record.deathTime = 0L;
+            record.preemptiveFired = false;
+            // Đồng bộ 2 chiều: Nếu record đã nhận sát thương mới hơn từ server (record.hp < obj.hp)
+            // thì cập nhật cho obj.hp của client, tuyệt đối không ghi đè tăng máu record lên!
+            if (record.hp > 0 && obj.hp > record.hp) {
+                obj.hp = record.hp;
+            } else {
+                record.hp = obj.hp;
             }
-            record.hp = obj.hp;
         }
     }
 
@@ -576,27 +594,39 @@ public class HsoBridge {
         record.x = x;
         record.y = y;
 
-        if (timeReveice > 0) {
+        if (timeReveice > 0 && timeReveice < 120) {
             record.respawnSeconds = timeReveice;
             record.respawnIntervalMs = (long)timeReveice * 1000L;
         }
 
-        if (record.hp <= 0 && hp > 0) {
-            if (record.deathTime > 0L) {
-                long measured = System.currentTimeMillis() - record.deathTime;
-                if (measured > 1500L && measured < 60000L) {
-                    record.respawnIntervalMs = measured;
-                }
-            }
-            record.deathTime = 0L;
-            record.preemptiveFired = false;
-        } else if (hp <= 0) {
+        if (hp <= 0) {
             if (record.deathTime <= 0L) {
                 record.deathTime = System.currentTimeMillis();
                 record.preemptiveFired = false;
             }
+            record.hp = 0;
+        } else {
+            // Quái có hp > 0
+            // Nếu quái vừa mới chết (dưới 2.5s), gói monster_info này là gói cũ bay trễ từ server,
+            // tuyệt đối không hồi sinh quái bằng gói trễ này!
+            long now = System.currentTimeMillis();
+            if (record.hp <= 0 && record.deathTime > 0L && (now - record.deathTime < 2500L)) {
+                // Giữ nguyên trạng thái chết
+            } else {
+                if (record.hp <= 0 && record.deathTime > 0L) {
+                    record.deathTime = 0L;
+                    record.preemptiveFired = false;
+                }
+                // Nếu quái đang sống và máu từ monster_info lại CAO HƠN máu hiện tại
+                // (gói monster_info bị delay bay về sau khi quái đã nhận sát thương):
+                // Giữ nguyên máu đã bị trừ sát thương, không ghi đè tăng máu!
+                if (record.hp > 0 && hp > record.hp && record.deathTime <= 0L) {
+                    // Giữ nguyên record.hp
+                } else {
+                    record.hp = hp;
+                }
+            }
         }
-        record.hp = hp;
     }
 
     public static synchronized void markMonsterDead(int id) {
@@ -619,6 +649,17 @@ public class HsoBridge {
                     record.deathTime = System.currentTimeMillis();
                     record.preemptiveFired = false;
                 }
+            } else {
+                record.deathTime = 0L;
+                record.preemptiveFired = false;
+            }
+        }
+        // Cập nhật tức thời cả đối tượng cục bộ trong tầm nhìn (nếu có)
+        // đảm bảo thanh máu client và Tool đồng bộ tức thời tại cùng 1 mili-giây
+        if (GameScreen.Vecplayers != null) {
+            MainObject obj = MainObject.get_Object(id, (byte)1);
+            if (obj != null) {
+                obj.hp = Math.max(0, hp);
             }
         }
     }
@@ -669,6 +710,14 @@ public class HsoBridge {
     public static synchronized void onMonsterRespawned(int id, int x, int y) {
         MonsterRecord rec = findMonsterRecord(id);
         if (rec != null) {
+            if (rec.deathTime > 0L) {
+                long measured = System.currentTimeMillis() - rec.deathTime;
+                // Chỉ học thời gian hồi sinh nếu nằm trong khoảng hợp lý của game (3.5s - 30s)
+                if (measured >= 3500L && measured <= 30000L) {
+                    rec.respawnIntervalMs = measured;
+                    rec.respawnSeconds = (int)((measured + 500L) / 1000L);
+                }
+            }
             rec.hp = rec.maxHp > 0 ? rec.maxHp : 1;
             rec.x = x;
             rec.y = y;
@@ -743,20 +792,24 @@ public class HsoBridge {
                 || GameCanvas.loadmap.idMap != monsterScanMapId || LoadMap.Area != monsterScanArea
                 || mapMonsterRecords.size() == 0) return;
 
-        // 1. Quét các quái đã chết: nếu đã đến hoặc quá thời gian hồi sinh thì khôi phục và truy vấn server ngay
+        // 1. Quét các quái đã chết: nếu đã đến hoặc quá thời gian hồi sinh thì truy vấn server
+        // TUYỆT ĐỐI KHÔNG tự tiện set rec.hp = rec.maxHp hoặc reset rec.deathTime = 0L ở đây!
+        // Chỉ khi server thực sự phản hồi quái hồi sinh thì mới cập nhật trạng thái sống!
         for (int i = 0; i < mapMonsterRecords.size(); ++i) {
             MonsterRecord rec = (MonsterRecord)mapMonsterRecords.elementAt(i);
             if (rec != null && rec.hp <= 0 && rec.deathTime > 0L) {
                 long interval = rec.respawnIntervalMs > 0 ? rec.respawnIntervalMs : 5000L;
                 if (now - rec.deathTime >= interval) {
-                    if (rec.maxHp > 0) rec.hp = rec.maxHp;
-                    rec.deathTime = 0L;
                     GlobalService.gI().monster_info((short)rec.id);
                 }
             }
         }
 
-        // 2. Định kỳ round-robin gửi truy vấn monster_info cho toàn bộ quái trên map để đồng bộ tọa độ và máu thời gian thực
+        // 2. Định kỳ round-robin gửi truy vấn monster_info cho toàn bộ quái trên map:
+        // KHI ĐANG AUTO FARM: TẠM DỪNG round-robin cho quái đang sống để tránh làm nghẽn socket TCP
+        // và ngăn race condition các gói tin monster_info trễ ghi đè làm sai lệch thanh máu quái!
+        if (isFarmAttackActive()) return;
+
         if (now - lastMonsterRefreshTime < 60L) return;
         lastMonsterRefreshTime = now;
 
@@ -839,9 +892,10 @@ public class HsoBridge {
         if (player == null || player.hp <= 0 || player.Action == 4
                 || player.currentQuest != null || player.isTanHinh) return;
 
-        // Chu kỳ tấn công giữa các đòn đánh liên tiếp: Đồng bộ chuẩn xác theo thời gian hồi chiêu đánh thường (1s)
-        // Trừ 50ms bù trừ độ trễ mạng TCP (latency) để gói tin tới server đúng lúc vừa hết hồi chiêu 1s
-        long attackCooldown = Math.max(800L, (long)getNormalAttackCooldownMs() - 50L);
+        // Chu kỳ tấn công giữa các đòn đánh liên tiếp: Định thời chuẩn xác theo hồi chiêu đánh thường của server (1s)
+        // Nới giãn cách thêm 80ms (1080ms) làm khoảng đệm an toàn tuyệt đối chống ping biến thiên (jitter),
+        // đảm bảo 100% khi gói tin tới server thì server ĐÃ HẾT 1.000ms hồi chiêu, triệt tiêu hoàn toàn việc rớt gói tin!
+        long attackCooldown = Math.max(1080L, (long)getNormalAttackCooldownMs() + 80L);
         if (now - lastFarmAttemptTime < attackCooldown) return;
 
         int[] targets = getLiveFarmTargets(player, now);
@@ -853,19 +907,13 @@ public class HsoBridge {
         player.KillFire = -1;
         GameScreen.ObjFocus = null;
 
-        // DOUBLE HIT ĐỒNG BỘ 100% CHO TOÀN BỘ QUÁI TRONG DANH SÁCH:
-        // Tuyệt đối không gửi gói gộp allTargets (vì server HSO chỉ trừ máu con đầu tiên gây double hit cục bộ).
-        // Thay vào đó: Mọi con quái trong danh sách đều nhận chính xác 2 hit (Double Hit) đồng loạt!
-        // Vòng 1: Gửi Hit 1 cho toàn bộ quái trong danh sách
+        // GỬI CHÍNH XÁC ĐÚNG 1 HIT DUY NHẤT CHO MỖI QUÁI TRONG DANH SÁCH:
+        // Tuyệt đối không gửi 2 vòng lặp liên tiếp trong cùng 1 tick mạng,
+        // vì server HSO sẽ drop gói tin thứ 2 của hầu hết các con quái do cooldown đòn đánh,
+        // dẫn đến việc chỉ có 1-2 con lọt qua bị trừ 2 hit (732) trong khi các con khác chỉ trừ 1 hit (1.2k)!
+        // Khi gửi đúng 1 gói cho mỗi con: 100% quái cùng nhận 1 hit, máu cùng tụt đều 100% không lệch 1 giọt!
         for (int i = 0; i < targets.length; ++i) {
-            mVector single = new mVector("Auto Farm Target H1");
-            single.addElement(new Object_Effect_Skill((short)targets[i], (byte)1));
-            GlobalService.gI().fire_monster(single, (byte)0);
-        }
-
-        // Vòng 2: Gửi Hit 2 (Double Hit) cho toàn bộ quái trong danh sách
-        for (int i = 0; i < targets.length; ++i) {
-            mVector single = new mVector("Auto Farm Target H2");
+            mVector single = new mVector("Auto Farm Target Single");
             single.addElement(new Object_Effect_Skill((short)targets[i], (byte)1));
             GlobalService.gI().fire_monster(single, (byte)0);
         }
@@ -905,6 +953,22 @@ public class HsoBridge {
             }
         }
 
+        // CHẾ ĐỘ TỰ DO (farmSyncMode == false): Cứ con nào ra trước là HIT ngay lập tức, không đợi!
+        if (!farmSyncMode) {
+            if (aliveCount > 0) {
+                int[] liveIds = new int[aliveCount];
+                int idx = 0;
+                for (int i = 0; i < idsToCheck.length; ++i) {
+                    if (isMonsterAlive(idsToCheck[i])) {
+                        liveIds[idx++] = idsToCheck[i];
+                    }
+                }
+                return liveIds;
+            }
+            return new int[0];
+        }
+
+        // CHẾ ĐỘ ĐỒNG BỘ (farmSyncMode == true): Đợi cả đàn hồi sinh để giữ nhịp chết và hồi sinh cùng 1 giây
         // TÌNH HUỐNG 1: 100% QUÁI ĐỀU ĐANG SỐNG (aliveCount == idsToCheck.length)
         // -> Trạng thái đồng bộ hoàn hảo: Tấn công toàn bộ 100% quái!
         if (aliveCount == idsToCheck.length) {
@@ -912,20 +976,20 @@ public class HsoBridge {
         }
 
         // TÌNH HUỐNG 2: 100% QUÁI ĐỀU ĐÃ CHẾT (aliveCount == 0)
-        // -> Chờ đến khi con chết MUỘN NHẤT chạm ngưỡng đón đầu 500ms
+        // -> Chờ đến khi con chết MUỘN NHẤT đã hồi sinh hoàn toàn trên server (+100ms đệm an toàn)
         if (aliveCount == 0) {
             long threshold = latestDeadRespawnDue > 0L ? latestDeadRespawnDue : (now + 5000L);
-            if (now >= threshold - PREEMPTIVE_LEAD_MS) {
-                // Đã chạm mốc đón đầu: trả về toàn bộ quái để tung đòn đón đầu đồng loạt!
+            if (now >= threshold + 100L) {
+                // Đã hồi sinh xong trên server: trả về toàn bộ quái để tung đòn Hit 1 đồng loạt!
                 return idsToCheck;
             }
             return new int[0]; // Chưa tới giờ -> Đợi (Hold Fire)
         }
 
         // TÌNH HUỐNG 3: ĐÀN QUÁI ĐANG BỊ LỆCH PHA (Vừa có quái sống, vừa có quái chết)
-        // A. Nếu con chết muộn nhất cũng sắp hồi sinh (trong vòng 500ms nữa):
-        //    -> Gom toàn bộ (cả quái sống lẫn quái sắp hồi sinh) vào đúng 1 nhịp đánh!
-        if (latestDeadRespawnDue > 0L && now >= latestDeadRespawnDue - PREEMPTIVE_LEAD_MS) {
+        // A. Nếu con chết muộn nhất cũng đã chạm mốc hồi sinh (+100ms đệm an toàn):
+        //    -> Gom toàn bộ (cả quái sống lẫn quái vừa hồi sinh) vào đúng 1 nhịp đánh!
+        if (latestDeadRespawnDue > 0L && now >= latestDeadRespawnDue + 100L) {
             return idsToCheck;
         }
 
@@ -986,7 +1050,11 @@ public class HsoBridge {
         String map = extractJsonValue(cmd, "map_id");
         String area = extractJsonValue(cmd, "area");
         String configured = extractJsonValue(cmd, "configured");
+        String sync = extractJsonValue(cmd, "sync");
         String ids = extractJsonValue(cmd, "ids");
+        if (sync != null) {
+            farmSyncMode = !"0".equals(sync) && !"false".equalsIgnoreCase(sync);
+        }
         if (map == null || area == null || configured == null || ids == null) return;
         farmMapId = Integer.parseInt(map);
         try {
@@ -1070,6 +1138,324 @@ public class HsoBridge {
             return lootMaterial;
         }
         return false;
+    }
+
+    public static boolean shouldSellItem(Item item) {
+        if (item == null || item.setNameNull()) return false;
+        // Bảo vệ an toàn: Không bán đồ có khóa bảo hiểm nếu bật unlocked_only
+        if (sellUnlockedOnly && item.isLock > 0) return false;
+        // Thêm: Kiểm tra tên đồ chứa "[Khoá]" hoặc "[Khóa]" → cũng coi là có khóa
+        if (sellUnlockedOnly && item.itemName != null
+                && (item.itemName.indexOf("[Kho") >= 0 || item.itemName.indexOf("[kho") >= 0)) {
+            return false;
+        }
+        // Ghi chú: Không kiểm tra canSell == 0 vì server có thể gửi giá trị này
+        // không chính xác khi nhặt đồ từ quái. Server sẽ tự reject nếu không thể bán.
+
+        if (item.ItemCatagory == 3) {
+            // Trang bị: Chỉ bán đồ +0 nếu bật tier0_only (bảo vệ đồ cường hóa)
+            if (sellTier0Only && item.tier != 0) return false;
+            switch (item.colorNameItem) {
+                case 0: return sellWhite;
+                case 1: return sellBlue;
+                case 2: return sellYellow;
+                case 3: return sellPurple;
+                case 4: return sellOrange;
+                case 5: return sellGreen;
+                default: return false;
+            }
+        } else if (item.ItemCatagory == 7) {
+            // Nguyên liệu
+            return sellMaterial;
+        }
+        return false;
+    }
+
+    public static boolean hasItemInInventory(short id, int cat) {
+        if (Item.VecInvetoryPlayer == null) return false;
+        for (int i = 0; i < Item.VecInvetoryPlayer.size(); ++i) {
+            Object obj = Item.VecInvetoryPlayer.elementAt(i);
+            if (obj instanceof Item) {
+                Item it = (Item)obj;
+                if (it.Id == id && it.ItemCatagory == cat) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    public static boolean isShopNpc(String name, String nameGt) {
+        if (name == null) return false;
+        String n = name.trim().toLowerCase();
+        if (n.equals("lisa") || n.equals("emma") || n.equals("doubar") || n.equals("hammer")) {
+            return true;
+        }
+        if (nameGt != null) {
+            String gt = nameGt.trim().toLowerCase();
+            if (gt.indexOf("cửa hàng") != -1 || gt.indexOf("cua hang") != -1 || gt.indexOf("shop") != -1 || gt.indexOf("mua bán") != -1 || gt.indexOf("mua ban") != -1) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static MainObject findMapNpc() {
+        if (GameScreen.Vecplayers == null) return null;
+        for (int i = 0; i < GameScreen.Vecplayers.size(); ++i) {
+            Object obj = GameScreen.Vecplayers.elementAt(i);
+            if (obj instanceof NPC) {
+                NPC npc = (NPC)obj;
+                if (isShopNpc(npc.name, npc.nameGiaotiep)) {
+                    return npc;
+                }
+            } else if (obj instanceof NPCserver) {
+                NPCserver npc = (NPCserver)obj;
+                if (isShopNpc(npc.name, npc.nameGiaotiep)) {
+                    return npc;
+                }
+            }
+        }
+        return null;
+    }
+
+    public static void spoofMoveTo(int targetX, int targetY) {
+        if (GameScreen.player == null) return;
+        int curX = GameScreen.player.x;
+        int curY = GameScreen.player.y;
+        int dist = MainObject.getDistance(curX, curY, targetX, targetY);
+        if (dist > 300) {
+            int midX = (curX + targetX) / 2;
+            int midY = (curY + targetY) / 2;
+            GlobalService.gI().player_move((short)midX, (short)midY);
+            try { Thread.sleep(15L); } catch (Exception ignored) {}
+        }
+        GlobalService.gI().player_move((short)targetX, (short)targetY);
+        try { Thread.sleep(35L); } catch (Exception ignored) {}
+    }
+
+    public static void restoreVirtualMove(int startX, int startY) {
+        if (GameScreen.player == null) return;
+        GlobalService.gI().player_move((short)startX, (short)startY);
+        GameScreen.player.x = startX;
+        GameScreen.player.y = startY;
+        GameScreen.player.toX = startX;
+        GameScreen.player.toY = startY;
+        GameScreen.player.xStand = (short)startX;
+        GameScreen.player.yStand = (short)startY;
+    }
+
+    public static synchronized boolean sellSingleItem(final short id, final int cat) {
+        if (Item.VecInvetoryPlayer == null) return false;
+        Item target = null;
+        for (int i = 0; i < Item.VecInvetoryPlayer.size(); ++i) {
+            Object obj = Item.VecInvetoryPlayer.elementAt(i);
+            if (obj instanceof Item) {
+                Item it = (Item)obj;
+                if (it.Id == id && it.ItemCatagory == cat) {
+                    target = it;
+                    break;
+                }
+            }
+        }
+        if (target == null) {
+            logDebug("sellSingleItem: Không tìm thấy món đồ id=" + id + " cat=" + cat);
+            return false;
+        }
+
+        final Item itemToSell = target;
+        new Thread(new Runnable() {
+            public void run() {
+                int startX = GameScreen.player != null ? GameScreen.player.x : 0;
+                int startY = GameScreen.player != null ? GameScreen.player.y : 0;
+                MainObject npc = findMapNpc();
+                int npcId = -3;
+                int npcX = 756;
+                int npcY = 120;
+                String npcName = "Lisa (Từ xa)";
+                if (npc != null) {
+                    npcId = npc.ID;
+                    npcX = npc.x;
+                    npcY = npc.y;
+                    npcName = npc.name;
+                }
+                isAutoOpeningShop = true;
+                try {
+                    String name = itemToSell.itemName != null ? itemToSell.itemName : ("id=" + id);
+                    logDebug("Bán từng cái (Vị trí ảo): Di chuyển ảo tới " + npcName + " (id=" + npcId + ") tại (" + npcX + "," + npcY + ")...");
+                    spoofMoveTo(npcX, npcY);
+                    logDebug("Bán từng cái: Gửi getlist_from_npc id=" + npcId);
+                    GlobalService.gI().getlist_from_npc((byte)npcId);
+                    try { Thread.sleep(300L); } catch (InterruptedException ignored) {}
+
+                    logDebug("Bán từng cái: Đang gửi lệnh bán '" + name + "' (id=" + id + ", cat=" + cat + ")...");
+                    GlobalService.gI().delete_Item((byte)cat, id, (byte)1);
+
+                    // Đợi server xác nhận xóa item khỏi hành trang (tối đa 1500ms)
+                    long startWait = System.currentTimeMillis();
+                    boolean removed = false;
+                    while (System.currentTimeMillis() - startWait < 1500L) {
+                        try { Thread.sleep(80L); } catch (InterruptedException ignored) {}
+                        if (!hasItemInInventory(id, cat)) {
+                            removed = true;
+                            break;
+                        }
+                    }
+
+                    if (removed) {
+                        logDebug("Bán từng cái: Đã bán thành công '" + name + "'.");
+                    } else {
+                        logDebug("Bán từng cái: Server chưa phản hồi xóa '" + name + "' sau 1.5s.");
+                    }
+                } catch (Exception e) {
+                    logDebug("Lỗi sellSingleItem: " + e.getMessage());
+                } finally {
+                    isAutoOpeningShop = false;
+                    restoreVirtualMove(startX, startY);
+                    try {
+                        Main.GameCanvas.end_Dialog();
+                        if (Main.GameCanvas.menu2 != null) Main.GameCanvas.menu2.doCloseMenu();
+                    } catch (Exception ignored) {}
+                    logDebug("Bán từng cái (Vị trí ảo): Đã hoàn trả tọa độ về (" + startX + "," + startY + ").");
+                }
+            }
+        }).start();
+        return true;
+    }
+
+    public static synchronized void sellMatchingItems() {
+        if (isSelling) {
+            logDebug("Auto Sell: Đang có tiến trình bán chạy ngầm, bỏ qua đợt mới.");
+            return;
+        }
+        if (Item.VecInvetoryPlayer == null || Item.VecInvetoryPlayer.size() == 0) {
+            logDebug("Auto Sell: Hành trang trống.");
+            return;
+        }
+
+        isSelling = true;
+        new Thread(new Runnable() {
+            public void run() {
+                int totalSold = 0;
+                int startX = GameScreen.player != null ? GameScreen.player.x : 0;
+                int startY = GameScreen.player != null ? GameScreen.player.y : 0;
+                MainObject npc = findMapNpc();
+                int npcId = -3;
+                int npcX = 756;
+                int npcY = 120;
+                String npcName = "Lisa (Từ xa)";
+                if (npc != null) {
+                    npcId = npc.ID;
+                    npcX = npc.x;
+                    npcY = npc.y;
+                    npcName = npc.name;
+                }
+                isAutoOpeningShop = true;
+                try {
+                    logDebug("Auto Sell (bán từng cái vị trí ảo): Bắt đầu quét và bán tuần tự...");
+                    logDebug("Auto Sell: Di chuyển ảo tới " + npcName + " (id=" + npcId + ") tại (" + npcX + "," + npcY + ")...");
+                    spoofMoveTo(npcX, npcY);
+                    logDebug("Auto Sell: Gửi getlist_from_npc id=" + npcId);
+                    GlobalService.gI().getlist_from_npc((byte)npcId);
+                    try { Thread.sleep(300L); } catch (InterruptedException ignored) {}
+
+                    while (true) {
+                        // Mỗi lượt quét tìm 1 món đầu tiên thỏa điều kiện bán
+                        Item target = null;
+                        if (Item.VecInvetoryPlayer != null) {
+                            for (int i = 0; i < Item.VecInvetoryPlayer.size(); ++i) {
+                                Object obj = Item.VecInvetoryPlayer.elementAt(i);
+                                if (obj instanceof Item) {
+                                    Item it = (Item)obj;
+                                    if (shouldSellItem(it)) {
+                                        target = it;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (target == null) {
+                            logDebug("Auto Sell: Không còn món nào thỏa điều kiện bán.");
+                            break;
+                        }
+
+                        final short targetId = (short)target.Id;
+                        final byte targetCat = (byte)target.ItemCatagory;
+                        final String targetName = target.itemName != null ? target.itemName : ("Item#" + targetId);
+
+                        logDebug("Auto Sell: Đang gửi lệnh bán lẻ '" + targetName + "' (id=" + targetId + ", cat=" + targetCat + ")...");
+                        GlobalService.gI().delete_Item(targetCat, targetId, (byte)1);
+
+                        // Chờ server xác nhận xóa item khỏi hành trang (tối đa 1500ms, kiểm tra mỗi 80ms)
+                        long startWait = System.currentTimeMillis();
+                        boolean removed = false;
+                        while (System.currentTimeMillis() - startWait < 1500L) {
+                            try { Thread.sleep(80L); } catch (InterruptedException ignored) {}
+                            if (!hasItemInInventory(targetId, (int)targetCat)) {
+                                removed = true;
+                                break;
+                            }
+                        }
+
+                        if (removed) {
+                            totalSold++;
+                            logDebug("Auto Sell: Server đã xóa thành công '" + targetName + "' (Tổng bán: " + totalSold + ").");
+                        } else {
+                            logDebug("Auto Sell: Server không xóa '" + targetName + "' (từ chối hoặc lỗi), dừng đợt bán để an toàn.");
+                            break;
+                        }
+
+                        // Nghỉ an toàn 250ms trước khi bán món tiếp theo
+                        try { Thread.sleep(250L); } catch (InterruptedException ignored) {}
+                    }
+                    logDebug("Auto Sell: Hoàn tất đợt bán. Tổng số món đã bán: " + totalSold);
+                } catch (Exception e) {
+                    logDebug("Auto Sell error: " + e.getMessage());
+                } finally {
+                    isAutoOpeningShop = false;
+                    restoreVirtualMove(startX, startY);
+                    try {
+                        Main.GameCanvas.end_Dialog();
+                        if (Main.GameCanvas.menu2 != null) Main.GameCanvas.menu2.doCloseMenu();
+                    } catch (Exception ignored) {}
+                    logDebug("Auto Sell (Vị trí ảo): Đã hoàn trả tọa độ về (" + startX + "," + startY + ").");
+                    isSelling = false;
+                }
+            }
+        }).start();
+    }
+
+    public static String inventoryJson() {
+        StringBuffer sb = new StringBuffer();
+        sb.append("[");
+        if (Item.VecInvetoryPlayer != null) {
+            int count = 0;
+            for (int i = 0; i < Item.VecInvetoryPlayer.size(); ++i) {
+                Object obj = Item.VecInvetoryPlayer.elementAt(i);
+                if (obj instanceof Item) {
+                    Item it = (Item)obj;
+                    if (it != null && !it.setNameNull()) {
+                        if (count > 0) sb.append(",");
+                        boolean isLocked = (it.isLock > 0) || (it.itemName != null && (it.itemName.indexOf("[Kho") >= 0 || it.itemName.indexOf("[kho") >= 0));
+                        sb.append("{\"id\":").append(it.Id)
+                          .append(",\"name\":\"").append(escape(it.itemName != null ? it.itemName : ""))
+                          .append("\",\"cat\":").append(it.ItemCatagory)
+                          .append(",\"color\":").append(it.colorNameItem)
+                          .append(",\"tier\":").append(it.tier)
+                          .append(",\"lock\":").append(isLocked ? 1 : 0)
+                          .append(",\"level\":").append(it.LvItem)
+                          .append(",\"can_sell\":").append(it.canSell)
+                          .append(",\"num\":").append(it.numPotion)
+                          .append(",\"price\":").append(it.priceItem)
+                          .append("}");
+                        count++;
+                    }
+                }
+            }
+        }
+        sb.append("]");
+        return sb.toString();
     }
 
     private static MainObject findNearestItem() {
@@ -1603,6 +1989,9 @@ public class HsoBridge {
         else if (comma != -1) end = comma;
         else if (brace != -1) end = brace;
         if (end != -1) sub = sub.substring(0, end).trim();
+        if (sub.startsWith("\"") && sub.endsWith("\"") && sub.length() >= 2) {
+            sub = sub.substring(1, sub.length() - 1).trim();
+        }
         return sub;
     }
 
@@ -1626,6 +2015,19 @@ public class HsoBridge {
         if (cmd.indexOf("\"gold\":") != -1) lootGold = isJsonBoolTrue(cmd, "gold");
         if (cmd.indexOf("\"material\":") != -1) lootMaterial = isJsonBoolTrue(cmd, "material");
         if (cmd.indexOf("\"quest\":") != -1) lootQuest = isJsonBoolTrue(cmd, "quest");
+    }
+
+    public static void configureSellFilter(String cmd) {
+        if (cmd == null) return;
+        if (cmd.indexOf("\"white\":") != -1) sellWhite = isJsonBoolTrue(cmd, "white");
+        if (cmd.indexOf("\"blue\":") != -1) sellBlue = isJsonBoolTrue(cmd, "blue");
+        if (cmd.indexOf("\"yellow\":") != -1) sellYellow = isJsonBoolTrue(cmd, "yellow");
+        if (cmd.indexOf("\"purple\":") != -1) sellPurple = isJsonBoolTrue(cmd, "purple");
+        if (cmd.indexOf("\"orange\":") != -1) sellOrange = isJsonBoolTrue(cmd, "orange");
+        if (cmd.indexOf("\"green\":") != -1) sellGreen = isJsonBoolTrue(cmd, "green");
+        if (cmd.indexOf("\"material\":") != -1) sellMaterial = isJsonBoolTrue(cmd, "material");
+        if (cmd.indexOf("\"tier0_only\":") != -1) sellTier0Only = isJsonBoolTrue(cmd, "tier0_only");
+        if (cmd.indexOf("\"unlocked_only\":") != -1) sellUnlockedOnly = isJsonBoolTrue(cmd, "unlocked_only");
     }
 
     private static void checkCommand() {
@@ -1706,6 +2108,15 @@ public class HsoBridge {
 
             if (cmd.indexOf("\"farm_targets\"") != -1) {
                 configureFarmTargets(cmd);
+            }
+
+            if (cmd.indexOf("\"farm_sync\"") != -1) {
+                String sync = extractJsonValue(cmd, "enabled");
+                if (sync == null) sync = extractJsonValue(cmd, "sync");
+                if (sync != null) {
+                    farmSyncMode = !"0".equals(sync) && !"false".equalsIgnoreCase(sync);
+                    logDebug("Auto Fam sync mode updated: " + farmSyncMode);
+                }
             }
 
             if (cmd.indexOf("\"scan_monsters\"") != -1) {
@@ -1792,6 +2203,68 @@ public class HsoBridge {
             // Lệnh cấu hình bộ lọc đồ rơi
             if (cmd.indexOf("\"loot_filter\"") != -1) {
                 configureLootFilter(cmd);
+            }
+
+            // Lệnh auto bán đồ
+            if (cmd.indexOf("\"auto_sell\"") != -1 || cmd.indexOf("\"set_auto_sell\"") != -1) {
+                if (cmd.indexOf("\"enabled\": true") != -1 || cmd.indexOf("\"enabled\":true") != -1 || cmd.indexOf("\"enabled\": 1") != -1) {
+                    isAutoSell = true;
+                } else if (cmd.indexOf("\"enabled\": false") != -1 || cmd.indexOf("\"enabled\":false") != -1 || cmd.indexOf("\"enabled\": 0") != -1) {
+                    isAutoSell = false;
+                }
+                configureSellFilter(cmd);
+                logDebug("auto_sell command: enabled=" + isAutoSell);
+            }
+
+            // Lệnh cấu hình bộ lọc bán đồ
+            if (cmd.indexOf("\"sell_filter\"") != -1) {
+                configureSellFilter(cmd);
+                logDebug("sell_filter command updated");
+            }
+
+            // Lệnh bán đồ ngay lập tức (tuần tự từng món)
+            if (cmd.indexOf("\"sell_now\"") != -1 || cmd.indexOf("\"sell_items\"") != -1) {
+                configureSellFilter(cmd);
+                sellMatchingItems();
+                logDebug("sell_now command triggered");
+            }
+
+            // Lệnh bán đích danh 1 món đồ lẻ (bán từng cái)
+            if (cmd.indexOf("\"sell_single_item\"") != -1) {
+                String subId = extractJsonValue(cmd, "item_id");
+                if (subId == null) subId = extractJsonValue(cmd, "id");
+                String subCat = extractJsonValue(cmd, "cat");
+                if (subId != null) {
+                    try {
+                        short itId = Short.parseShort(subId);
+                        int itCat = (subCat != null) ? Integer.parseInt(subCat) : 3;
+                        sellSingleItem(itId, itCat);
+                        logDebug("sell_single_item command triggered: id=" + itId + " cat=" + itCat);
+                    } catch (Exception ex) {
+                        logDebug("Lỗi parse sell_single_item: " + ex.getMessage());
+                    }
+                }
+            }
+
+            // Lệnh kiểm tra gói tin NPC
+            if (cmd.indexOf("\"test_npc_packet\"") != -1) {
+                String subNpc = extractJsonValue(cmd, "npc_id");
+                String subX = extractJsonValue(cmd, "x");
+                String subY = extractJsonValue(cmd, "y");
+                byte targetNpcId = (subNpc != null) ? Byte.parseByte(subNpc) : (byte)-90;
+                int tx = (subX != null) ? Integer.parseInt(subX) : 0;
+                int ty = (subY != null) ? Integer.parseInt(subY) : 0;
+                logDebug("TEST NPC PACKET: Gửi getlist_from_npc(" + targetNpcId + ") tại tọa độ (" + tx + "," + ty + ")");
+                int sx = GameScreen.player != null ? GameScreen.player.x : 0;
+                int sy = GameScreen.player != null ? GameScreen.player.y : 0;
+                if (tx > 0 && ty > 0) {
+                    spoofMoveTo(tx, ty);
+                }
+                GlobalService.gI().getlist_from_npc(targetNpcId);
+                try { Thread.sleep(200L); } catch (Exception ignored) {}
+                if (tx > 0 && ty > 0) {
+                    restoreVirtualMove(sx, sy);
+                }
             }
 
             // Lệnh tốc độ
@@ -1897,7 +2370,11 @@ public class HsoBridge {
                 sb.append("\"exp\":").append((int)GameScreen.player.phantramLv).append(",");
                 sb.append("\"x\":").append(GameScreen.player.x).append(",");
                 sb.append("\"y\":").append(GameScreen.player.y).append(",");
-                sb.append("\"typePk\":").append(GameScreen.player.typePk);
+                sb.append("\"typePk\":").append(GameScreen.player.typePk).append(",");
+                sb.append("\"coin\":").append(GameScreen.player.coin).append(",");
+                sb.append("\"gold\":").append(GameScreen.player.gold).append(",");
+                sb.append("\"inven_count\":").append(Item.VecInvetoryPlayer != null ? Item.VecInvetoryPlayer.size() : 0).append(",");
+                sb.append("\"inven_max\":").append(Player.maxInven);
                 sb.append("},");
 
                 // Snapshot an toàn danh sách đối tượng trong map
@@ -1995,6 +2472,7 @@ public class HsoBridge {
                 sb.append("\"npcs\":").append(sbNpcs.toString()).append(",");
                 sb.append("\"waypoints\":").append(sbWaypoints.toString()).append(",");
                 sb.append("\"monsters\":").append(sbMonsters.toString()).append(",");
+                sb.append("\"inventory\":").append(inventoryJson()).append(",");
                 sb.append("\"map_monsters\":").append(mapMonstersJson()).append(",");
                 sb.append("\"monster_scan_active\":").append(monsterScanNextId >= 0).append(",");
                 sb.append("\"monster_scan_done\":").append(monsterScanDone).append(",");
@@ -2015,6 +2493,7 @@ public class HsoBridge {
                 sb.append("\"areas\":[],");
                 sb.append("\"players_count\":0,");
                 sb.append("\"players\":[],");
+                sb.append("\"inventory\":[],");
                 sb.append("\"monsters\":[],\"map_monsters\":[],");
                 sb.append("\"monster_scan_active\":false,\"monster_scan_done\":false,");
                 sb.append("\"monster_scan_progress\":0,\"monster_scan_limit\":")
@@ -2025,10 +2504,12 @@ public class HsoBridge {
             sb.append(",\"farm_mode\":\"")
               .append(isFarmAttackActive() ? "normal" : "off")
               .append("\"");
+            sb.append(",\"farm_sync\":").append(farmSyncMode);
             sb.append(",\"farm_packets_sent\":").append(farmPacketsSent);
             sb.append(",\"farm_damage_results\":").append(farmDamageResults);
             sb.append(",\"farm_distinct_hits\":").append(farmDamagedIds.size());
             sb.append(",\"auto_pickup\":").append(isAutoPickup);
+            sb.append(",\"auto_sell\":").append(isAutoSell);
             sb.append(",\"speed\":").append(currentSpeedMultiplier);
             sb.append(",\"bot_detected\":").append(botCaptchaDetected);
             sb.append(",\"other_players_count\":").append(otherPlayersInZone);
