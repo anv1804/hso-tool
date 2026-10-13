@@ -174,6 +174,7 @@ implements IMessageHandler {
             }
             case 16: {
                 GameCanvas.readMessenge.charInventory(msg);
+                com.silverknight.HsoBridge.noteRemoteSellInventory();
                 break;
             }
             case 19: {

@@ -1,5 +1,13 @@
 # Hướng Dẫn Sử Dụng & Đối Chiếu Bản Java - C# Hiệp Sĩ Online (HSO v403)
 
+## Nút gọi NPC Graham
+
+Trong bảng **CONTROLS**, dưới **Auto Sell**, bấm **NPC Graham (Bán đá)** để hiện menu Graham trong game. Client dùng menu đã ghi nhận gồm **Mua lạc đà**, **Bán đá quý**, **Đồ thương nhân**, **Hướng dẫn thương nhân**, đồng thời yêu cầu menu mới từ server. Người dùng chọn mục cần thao tác; lựa chọn vẫn gửi gói NPC thật. Việc menu xuất hiện chưa xác nhận server cho phép mua/bán tại map hiện tại.
+
+Các mục **Mua lạc đà** và **Đồ thương nhân** có thể mở lại danh sách shop đã ghi nhận ngoài Thung Lũng Kỳ Bí. Catalog được lưu riêng trong `npc_shop_cache/graham-shop-camel-v2.bin` và `graham-shop-equipment-v2.bin`; bản nâng cấp có thể dùng catalog thương nhân đã lưu trước đó để hiển thị trong lúc chờ server cập nhật. Chỉ lưu tên shop/loại shop/ID các món, không lưu hành trang hay số dư. Client dựng lại giao diện với hành trang hiện tại và tiếp tục gửi yêu cầu thật đến server. **Bán đá quý** và việc mua món trong shop vẫn cần server xử lý; mở được giao diện không đồng nghĩa giao dịch đã thành công.
+
+Nếu game/tool cũ đang mở, chạy `python hso_tool.py --npc-graham` để hiện cửa sổ nút riêng. Đóng cửa sổ nút này không đóng game. Lần mở tool mới tiếp theo, nút nằm sẵn trong CONTROLS. Cơ chế hiện menu tại chỗ cần JAR mới; bản đã build nằm ở `.pending` và được tool áp dụng khi mở game lại. Trong phiên sửa hiện tại, có bản vá live để nút hoạt động ngay trên JVM đang chạy.
+
 ## 1. Cấu Trúc Thư Mục Dự Án
 
 | Thư mục / Tập tin | Mô tả |

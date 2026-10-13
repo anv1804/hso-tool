@@ -60,8 +60,59 @@ public class HsoBridge {
     public static boolean sellTier0Only = true;
     public static boolean sellUnlockedOnly = true;
     public static volatile boolean isAutoOpeningShop = false;
-    private static volatile boolean isSelling = false;
     private static long lastAutoSellCheckTime = 0L;
+    private static volatile long remoteSellInventoryRevision = 0L;
+    private static final RemoteSellController remoteSell = new RemoteSellController(new RemoteSellController.Transport() {
+        public boolean connected() { return CLib.Session_ME.gI().isConnected(); }
+        public int playerId() { return GameScreen.player == null ? -1 : GameScreen.player.ID; }
+        public int mapId() { return GameCanvas.loadmap == null ? -1 : GameCanvas.loadmap.idMap; }
+        public int area() { return LoadMap.Area; }
+        public int x() { return GameScreen.player == null ? 0 : GameScreen.player.x; }
+        public int y() { return GameScreen.player == null ? 0 : GameScreen.player.y; }
+        public boolean alive() {
+            return GameScreen.player != null && GameScreen.player.hp > 0 && GameScreen.player.Action != 4;
+        }
+        public int quantity(RemoteSellController.Target target) {
+            if (Item.VecInvetoryPlayer == null) return -1;
+            Item item = findInventoryItem(target.id, target.category);
+            if (item == null) return 0;
+            if (!target.name.equals(item.itemName)) return -1;
+            return item.ItemCatagory == 3 ? 1 : Math.max(1, item.numPotion);
+        }
+        public boolean allowed(RemoteSellController.Target target) {
+            Item item = findInventoryItem(target.id, target.category);
+            if (item == null || item.setNameNull()) return false;
+            if (!target.explicit) return shouldSellItem(item);
+            return (item.ItemCatagory == 3 || item.ItemCatagory == 7)
+                    && (target.allowLocked || !isLockedItem(item));
+        }
+        public long inventoryRevision() { return remoteSellInventoryRevision; }
+        public boolean safeVirtualPosition(int x, int y) {
+            if (GameCanvas.loadmap == null || x < 0 || y < 0
+                    || x >= GameCanvas.loadmap.mapW * LoadMap.wTile
+                    || y >= GameCanvas.loadmap.mapH * LoadMap.wTile) return false;
+            // Virtual packets must not touch a gate that could actually change the map.
+            if (LoadMap.vecPointChange != null) {
+                for (int i = 0; i < LoadMap.vecPointChange.size(); ++i) {
+                    Model.Point point = (Model.Point)LoadMap.vecPointChange.elementAt(i);
+                    if (point != null && MainObject.getDistance(x, y, point.x, point.y) <= 48) return false;
+                }
+            }
+            // Do not apply local pathfinding to packet-only positions. NPC bodies are
+            // blocked tiles in the renderer; the server decides whether a move is valid.
+            return true;
+        }
+        public void move(int x, int y) { GlobalService.gI().remoteSellMove(x, y); }
+        public void menu(int npcId) { GlobalService.gI().remoteSellMenu(npcId); }
+        public void selectMenu(int npcId, int menuId, int option) {
+            GlobalService.gI().remoteSellShop(npcId, menuId, option);
+        }
+        public void sell(RemoteSellController.Target target) {
+            GlobalService.gI().remoteSellItem(target.id, target.category);
+        }
+        public void confirm(int id, int type) { GlobalService.gI().remoteSellConfirm(id, type); }
+        public void log(String text) { logDebug(text); }
+    });
     public static boolean isAutoAttack = false;
     public static boolean pendingMinArea = false;
     public static boolean isSilentRequestArea = false;
@@ -142,9 +193,13 @@ public class HsoBridge {
         long now = System.currentTimeMillis();
 
         checkCommand();
+        remoteSell.tick(now);
+        isAutoOpeningShop = remoteSell.isActive();
         ensureMonsterScanContext();
-        advanceMonsterScan(now);
-        advanceMonsterRefresh(now);
+        if (!isRemoteSellBusy()) {
+            advanceMonsterScan(now);
+            advanceMonsterRefresh(now);
+        }
         int otherCount = 0;
         String otherName = null;
         boolean captchaFound = false;
@@ -191,7 +246,7 @@ public class HsoBridge {
         restorePinnedFocus();
         
         // Thực hiện auto nhặt đồ rơi liên tục trên toàn map nếu bật (tuân thủ bộ lọc đồ)
-        if (isAutoPickup && GameScreen.player != null && GameScreen.Vecplayers != null) {
+        if (!isRemoteSellBusy() && isAutoPickup && GameScreen.player != null && GameScreen.Vecplayers != null) {
             if (now - lastPickupTime >= 200) {
                 lastPickupTime = now;
                 Object[] arr = null;
@@ -216,16 +271,17 @@ public class HsoBridge {
 
         // Tự động bán đồ rác nếu bật Auto Sell (chỉ khi ở màn hình game và không mở dialog)
         if (isAutoSell && GameCanvas.currentScreen == GameCanvas.game && GameScreen.player != null) {
-            if (now - lastAutoSellCheckTime >= 3000L && !isSelling) {
+            long retryDelay = "failed".equals(remoteSell.phase()) ? 60000L : 3000L;
+            if (now - lastAutoSellCheckTime >= retryDelay && !isRemoteSellBusy()) {
                 lastAutoSellCheckTime = now;
                 if (GameCanvas.currentDialog == null) {
-                    sellMatchingItems();
+                    sellMatchingItems(true);
                 }
             }
         }
 
         // Thực hiện thông minh: Auto Tìm Quái & Đánh (Auto-Hunt) hoặc Tấn công Người chơi được ghim
-        if (isAutoAttack && GameCanvas.currentScreen == GameCanvas.game && GameScreen.player != null) {
+        if (!isRemoteSellBusy() && isAutoAttack && GameCanvas.currentScreen == GameCanvas.game && GameScreen.player != null) {
             // Ngăn hệ thống auto gốc kéo giật nhân vật về vị trí cũ (leashing)
             Player.isAutoFire = (byte)-1;
             Player.isCurAutoFire = false;
@@ -1245,185 +1301,165 @@ public class HsoBridge {
         GameScreen.player.yStand = (short)startY;
     }
 
-    public static synchronized boolean sellSingleItem(final short id, final int cat) {
-        if (Item.VecInvetoryPlayer == null) return false;
-        Item target = null;
+    private static Item findInventoryItem(short id, int category) {
+        if (Item.VecInvetoryPlayer == null) return null;
         for (int i = 0; i < Item.VecInvetoryPlayer.size(); ++i) {
-            Object obj = Item.VecInvetoryPlayer.elementAt(i);
-            if (obj instanceof Item) {
-                Item it = (Item)obj;
-                if (it.Id == id && it.ItemCatagory == cat) {
-                    target = it;
-                    break;
-                }
-            }
+            Object value = Item.VecInvetoryPlayer.elementAt(i);
+            if (!(value instanceof Item)) continue;
+            Item item = (Item)value;
+            if (item.Id == id && item.ItemCatagory == category) return item;
         }
-        if (target == null) {
-            logDebug("sellSingleItem: Không tìm thấy món đồ id=" + id + " cat=" + cat);
-            return false;
-        }
-
-        final Item itemToSell = target;
-        new Thread(new Runnable() {
-            public void run() {
-                int startX = GameScreen.player != null ? GameScreen.player.x : 0;
-                int startY = GameScreen.player != null ? GameScreen.player.y : 0;
-                MainObject npc = findMapNpc();
-                int npcId = -3;
-                int npcX = 756;
-                int npcY = 120;
-                String npcName = "Lisa (Từ xa)";
-                if (npc != null) {
-                    npcId = npc.ID;
-                    npcX = npc.x;
-                    npcY = npc.y;
-                    npcName = npc.name;
-                }
-                isAutoOpeningShop = true;
-                try {
-                    String name = itemToSell.itemName != null ? itemToSell.itemName : ("id=" + id);
-                    logDebug("Bán từng cái (Vị trí ảo): Di chuyển ảo tới " + npcName + " (id=" + npcId + ") tại (" + npcX + "," + npcY + ")...");
-                    spoofMoveTo(npcX, npcY);
-                    logDebug("Bán từng cái: Gửi getlist_from_npc id=" + npcId);
-                    GlobalService.gI().getlist_from_npc((byte)npcId);
-                    try { Thread.sleep(300L); } catch (InterruptedException ignored) {}
-
-                    logDebug("Bán từng cái: Đang gửi lệnh bán '" + name + "' (id=" + id + ", cat=" + cat + ")...");
-                    GlobalService.gI().delete_Item((byte)cat, id, (byte)1);
-
-                    // Đợi server xác nhận xóa item khỏi hành trang (tối đa 1500ms)
-                    long startWait = System.currentTimeMillis();
-                    boolean removed = false;
-                    while (System.currentTimeMillis() - startWait < 1500L) {
-                        try { Thread.sleep(80L); } catch (InterruptedException ignored) {}
-                        if (!hasItemInInventory(id, cat)) {
-                            removed = true;
-                            break;
-                        }
-                    }
-
-                    if (removed) {
-                        logDebug("Bán từng cái: Đã bán thành công '" + name + "'.");
-                    } else {
-                        logDebug("Bán từng cái: Server chưa phản hồi xóa '" + name + "' sau 1.5s.");
-                    }
-                } catch (Exception e) {
-                    logDebug("Lỗi sellSingleItem: " + e.getMessage());
-                } finally {
-                    isAutoOpeningShop = false;
-                    restoreVirtualMove(startX, startY);
-                    try {
-                        Main.GameCanvas.end_Dialog();
-                        if (Main.GameCanvas.menu2 != null) Main.GameCanvas.menu2.doCloseMenu();
-                    } catch (Exception ignored) {}
-                    logDebug("Bán từng cái (Vị trí ảo): Đã hoàn trả tọa độ về (" + startX + "," + startY + ").");
-                }
-            }
-        }).start();
-        return true;
+        return null;
     }
 
-    public static synchronized void sellMatchingItems() {
-        if (isSelling) {
-            logDebug("Auto Sell: Đang có tiến trình bán chạy ngầm, bỏ qua đợt mới.");
-            return;
+    private static boolean isLockedItem(Item item) {
+        return item.isLock > 0 || (item.itemName != null
+                && (item.itemName.indexOf("[Kho") >= 0 || item.itemName.indexOf("[kho") >= 0));
+    }
+
+    private static RemoteSellController.Target saleTarget(Item item, boolean explicit, boolean allowLocked) {
+        return new RemoteSellController.Target((short)item.Id, (byte)item.ItemCatagory, item.itemName,
+                item.ItemCatagory == 3 ? 1 : Math.max(1, item.numPotion), explicit, allowLocked);
+    }
+
+    private static RemoteSellController.Merchant remoteMerchant(int id, int x, int y, String name) {
+        // Stand beside the NPC instead of inside its collision rectangle.
+        int[][] offsets = {{0, 24}, {-24, 0}, {24, 0}, {0, -24}, {0, 48}, {-48, 0}, {48, 0}, {0, -48}};
+        for (int i = 0; i < offsets.length; ++i) {
+            int sx = x + offsets[i][0], sy = y + offsets[i][1];
+            if (GameCanvas.loadmap != null && sx >= 0 && sy >= 0
+                    && sx < GameCanvas.loadmap.mapW * LoadMap.wTile
+                    && sy < GameCanvas.loadmap.mapH * LoadMap.wTile && isWalkable(sx, sy)) {
+                return new RemoteSellController.Merchant(id, sx, sy, name);
+            }
         }
-        if (Item.VecInvetoryPlayer == null || Item.VecInvetoryPlayer.size() == 0) {
-            logDebug("Auto Sell: Hành trang trống.");
-            return;
+        return new RemoteSellController.Merchant(id, x, y, name);
+    }
+
+    private static RemoteSellController.Merchant[] remoteMerchants() {
+        java.util.ArrayList<RemoteSellController.Merchant> result = new java.util.ArrayList<RemoteSellController.Merchant>();
+        if (GameScreen.Vecplayers != null) {
+            for (int i = 0; i < GameScreen.Vecplayers.size(); ++i) {
+                Object value = GameScreen.Vecplayers.elementAt(i);
+                if (!(value instanceof MainObject)) continue;
+                MainObject npc = (MainObject)value;
+                String greeting = npc instanceof NPC ? ((NPC)npc).nameGiaotiep
+                        : npc instanceof NPCserver ? ((NPCserver)npc).nameGiaotiep : null;
+                if (!(npc instanceof NPC) && !(npc instanceof NPCserver) || !isShopNpc(npc.name, greeting)) continue;
+                int interactionId = npc instanceof NPCserver ? ((NPCserver)npc).getIDnpc() : npc.ID;
+                result.add(remoteMerchant(interactionId, npc.x, npc.y, npc.name));
+            }
         }
+        RemoteSellController.Merchant[] known = {
+            remoteMerchant(-3, 756, 120, "Lisa"),
+            remoteMerchant(-5, 180, 192, "Hammer"),
+            remoteMerchant(-4, 204, 576, "Doubar")
+        };
+        for (int k = 0; k < known.length; ++k) {
+            boolean found = false;
+            for (int i = 0; i < result.size(); ++i) if (result.get(i).id == known[k].id) found = true;
+            if (!found) result.add(known[k]);
+        }
+        return result.toArray(new RemoteSellController.Merchant[result.size()]);
+    }
 
-        isSelling = true;
-        new Thread(new Runnable() {
-            public void run() {
-                int totalSold = 0;
-                int startX = GameScreen.player != null ? GameScreen.player.x : 0;
-                int startY = GameScreen.player != null ? GameScreen.player.y : 0;
-                MainObject npc = findMapNpc();
-                int npcId = -3;
-                int npcX = 756;
-                int npcY = 120;
-                String npcName = "Lisa (Từ xa)";
-                if (npc != null) {
-                    npcId = npc.ID;
-                    npcX = npc.x;
-                    npcY = npc.y;
-                    npcName = npc.name;
-                }
-                isAutoOpeningShop = true;
-                try {
-                    logDebug("Auto Sell (bán từng cái vị trí ảo): Bắt đầu quét và bán tuần tự...");
-                    logDebug("Auto Sell: Di chuyển ảo tới " + npcName + " (id=" + npcId + ") tại (" + npcX + "," + npcY + ")...");
-                    spoofMoveTo(npcX, npcY);
-                    logDebug("Auto Sell: Gửi getlist_from_npc id=" + npcId);
-                    GlobalService.gI().getlist_from_npc((byte)npcId);
-                    try { Thread.sleep(300L); } catch (InterruptedException ignored) {}
+    private static boolean startRemoteSale(RemoteSellController.Target[] targets) {
+        if (isRemoteSellBusy()) {
+            logDebug("Remote Sell: giao dich dang chay, bo qua yeu cau trung.");
+            return false;
+        }
+        if (isStrikeActive || lastRemoteMoveTime > 0) {
+            remoteSell.reject("strike_busy", "Đang xử lý đòn đánh từ xa; hãy bán lại khi đòn đánh kết thúc.");
+            return false;
+        }
+        boolean started = remoteSell.start(targets, remoteMerchants(), System.currentTimeMillis());
+        if (started) {
+            stopFarmAutoMovement();
+            isAutoOpeningShop = true;
+            lastAutoSellCheckTime = System.currentTimeMillis();
+        } else {
+            remoteSell.reject("not_ready", "Chưa kết nối vào game hoặc không có vật phẩm phù hợp để bán.");
+        }
+        return started;
+    }
 
-                    while (true) {
-                        // Mỗi lượt quét tìm 1 món đầu tiên thỏa điều kiện bán
-                        Item target = null;
-                        if (Item.VecInvetoryPlayer != null) {
-                            for (int i = 0; i < Item.VecInvetoryPlayer.size(); ++i) {
-                                Object obj = Item.VecInvetoryPlayer.elementAt(i);
-                                if (obj instanceof Item) {
-                                    Item it = (Item)obj;
-                                    if (shouldSellItem(it)) {
-                                        target = it;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
+    public static boolean sellSingleItem(short id, int category) {
+        return sellSingleItem(id, category, false);
+    }
 
-                        if (target == null) {
-                            logDebug("Auto Sell: Không còn món nào thỏa điều kiện bán.");
-                            break;
-                        }
+    public static boolean sellSingleItem(short id, int category, boolean allowLocked) {
+        Item item = findInventoryItem(id, category);
+        if (item == null || item.setNameNull() || (category != 3 && category != 7)) {
+            remoteSell.reject("item_not_found", "Không tìm thấy vật phẩm cần bán trong hành trang.");
+            return false;
+        }
+        if (isLockedItem(item) && !allowLocked) {
+            remoteSell.reject("locked_item", "Vật phẩm có khóa: cần xác nhận bán trên bảng hành trang.");
+            return false;
+        }
+        return startRemoteSale(new RemoteSellController.Target[] {saleTarget(item, true, allowLocked)});
+    }
 
-                        final short targetId = (short)target.Id;
-                        final byte targetCat = (byte)target.ItemCatagory;
-                        final String targetName = target.itemName != null ? target.itemName : ("Item#" + targetId);
+    public static void sellMatchingItems() {
+        sellMatchingItems(false);
+    }
 
-                        logDebug("Auto Sell: Đang gửi lệnh bán lẻ '" + targetName + "' (id=" + targetId + ", cat=" + targetCat + ")...");
-                        GlobalService.gI().delete_Item(targetCat, targetId, (byte)1);
-
-                        // Chờ server xác nhận xóa item khỏi hành trang (tối đa 1500ms, kiểm tra mỗi 80ms)
-                        long startWait = System.currentTimeMillis();
-                        boolean removed = false;
-                        while (System.currentTimeMillis() - startWait < 1500L) {
-                            try { Thread.sleep(80L); } catch (InterruptedException ignored) {}
-                            if (!hasItemInInventory(targetId, (int)targetCat)) {
-                                removed = true;
-                                break;
-                            }
-                        }
-
-                        if (removed) {
-                            totalSold++;
-                            logDebug("Auto Sell: Server đã xóa thành công '" + targetName + "' (Tổng bán: " + totalSold + ").");
-                        } else {
-                            logDebug("Auto Sell: Server không xóa '" + targetName + "' (từ chối hoặc lỗi), dừng đợt bán để an toàn.");
-                            break;
-                        }
-
-                        // Nghỉ an toàn 250ms trước khi bán món tiếp theo
-                        try { Thread.sleep(250L); } catch (InterruptedException ignored) {}
-                    }
-                    logDebug("Auto Sell: Hoàn tất đợt bán. Tổng số món đã bán: " + totalSold);
-                } catch (Exception e) {
-                    logDebug("Auto Sell error: " + e.getMessage());
-                } finally {
-                    isAutoOpeningShop = false;
-                    restoreVirtualMove(startX, startY);
-                    try {
-                        Main.GameCanvas.end_Dialog();
-                        if (Main.GameCanvas.menu2 != null) Main.GameCanvas.menu2.doCloseMenu();
-                    } catch (Exception ignored) {}
-                    logDebug("Auto Sell (Vị trí ảo): Đã hoàn trả tọa độ về (" + startX + "," + startY + ").");
-                    isSelling = false;
+    private static void sellMatchingItems(boolean automatic) {
+        java.util.ArrayList<RemoteSellController.Target> targets = new java.util.ArrayList<RemoteSellController.Target>();
+        if (Item.VecInvetoryPlayer != null) {
+            for (int i = 0; i < Item.VecInvetoryPlayer.size(); ++i) {
+                Object value = Item.VecInvetoryPlayer.elementAt(i);
+                if (value instanceof Item && shouldSellItem((Item)value)) {
+                    Item item = (Item)value;
+                    targets.add(saleTarget(item, false, !sellUnlockedOnly));
                 }
             }
-        }).start();
+        }
+        if (targets.isEmpty()) {
+            if (!automatic) remoteSell.reject("no_matching_items", "Không có vật phẩm thỏa bộ lọc bán đồ.");
+            return;
+        }
+        startRemoteSale(targets.toArray(new RemoteSellController.Target[targets.size()]));
+    }
+
+    public static boolean isRemoteSellBusy() { return remoteSell.isActive(); }
+    public static boolean isRemoteSellPositionGuarded() {
+        return remoteSell.guardPosition(System.currentTimeMillis());
+    }
+    public static void noteRemoteSellInventory() { ++remoteSellInventoryRevision; }
+    public static boolean onRemoteSellMenu(int npcId, int menuId, int option) {
+        return remoteSell.onMenu(npcId, menuId, option);
+    }
+
+    public static int remoteShopOption(int npcId, int clazz, String[] options) {
+        int classOption = -1;
+        String[] classes = {"chiến binh", "sát thủ", "pháp sư", "xạ thủ"};
+        for (int i = 0; i < options.length; ++i) {
+            String label = options[i].trim().toLowerCase(java.util.Locale.ROOT);
+            if (label.equals("mua bán") || label.equals("mua ban") || label.equals("cửa hàng")
+                    || label.equals("cua hang") || label.equals("shop")) return i;
+            // Hammer/Doubar open equipment shops through the character-class menu.
+            if ((npcId == -5 || npcId == -4) && clazz >= 0 && clazz < classes.length
+                    && label.equals(classes[clazz])) classOption = i;
+        }
+        return classOption;
+    }
+    public static boolean onRemoteSellShop(int type) { return remoteSell.onShop(type); }
+    public static boolean onRemoteSellDialog(int id, int type, String text) {
+        return remoteSell.onDialog(id, type, text);
+    }
+    public static void noteRemoteSellNotice(String text) { remoteSell.onNotice(text); }
+
+    private static String remoteSellJson() {
+        synchronized (remoteSell) {
+            return "{\"active\":" + remoteSell.isActive()
+                    + ",\"phase\":\"" + escape(remoteSell.phase())
+                    + "\",\"message\":\"" + escape(remoteSell.message())
+                    + "\",\"error\":\"" + escape(remoteSell.error())
+                    + "\",\"sold_items\":" + remoteSell.soldItems()
+                    + ",\"sold_units\":" + remoteSell.soldUnits()
+                    + ",\"total_items\":" + remoteSell.totalItems() + "}";
+        }
     }
 
     public static String inventoryJson() {
@@ -1979,20 +2015,42 @@ public class HsoBridge {
     }
 
     private static String extractJsonValue(String json, String key) {
-        int idx = json.indexOf("\"" + key + "\":");
-        if (idx == -1) return null;
-        String sub = json.substring(idx + key.length() + 3).trim();
-        int comma = sub.indexOf(",");
-        int brace = sub.indexOf("}");
-        int end = -1;
-        if (comma != -1 && brace != -1) end = Math.min(comma, brace);
-        else if (comma != -1) end = comma;
-        else if (brace != -1) end = brace;
-        if (end != -1) sub = sub.substring(0, end).trim();
-        if (sub.startsWith("\"") && sub.endsWith("\"") && sub.length() >= 2) {
-            sub = sub.substring(1, sub.length() - 1).trim();
+        int keyStart = json.indexOf("\"" + key + "\"");
+        if (keyStart < 0) return null;
+        int idx = json.indexOf(':', keyStart + key.length() + 2);
+        if (idx < 0) return null;
+        ++idx;
+        while (idx < json.length() && Character.isWhitespace(json.charAt(idx))) ++idx;
+        if (idx >= json.length()) return null;
+        if (json.charAt(idx) == '"') {
+            StringBuilder value = new StringBuilder();
+            for (++idx; idx < json.length(); ++idx) {
+                char c = json.charAt(idx);
+                if (c == '"') return value.toString();
+                if (c != '\\') { value.append(c); continue; }
+                if (++idx >= json.length()) return null;
+                c = json.charAt(idx);
+                switch (c) {
+                    case 'u':
+                        if (idx + 4 >= json.length()) return null;
+                        try { value.append((char)Integer.parseInt(json.substring(idx + 1, idx + 5), 16)); }
+                        catch (NumberFormatException ex) { return null; }
+                        idx += 4;
+                        break;
+                    case 'n': value.append('\n'); break;
+                    case 'r': value.append('\r'); break;
+                    case 't': value.append('\t'); break;
+                    case 'b': value.append('\b'); break;
+                    case 'f': value.append('\f'); break;
+                    case '"': case '\\': case '/': value.append(c); break;
+                    default: return null;
+                }
+            }
+            return null;
         }
-        return sub;
+        int end = idx;
+        while (end < json.length() && json.charAt(end) != ',' && json.charAt(end) != '}') ++end;
+        return json.substring(idx, end).trim();
     }
 
     private static boolean isJsonBoolTrue(String json, String key) {
@@ -2238,7 +2296,14 @@ public class HsoBridge {
                     try {
                         short itId = Short.parseShort(subId);
                         int itCat = (subCat != null) ? Integer.parseInt(subCat) : 3;
-                        sellSingleItem(itId, itCat);
+                        String expectedName = extractJsonValue(cmd, "item_name");
+                        Item currentItem = findInventoryItem(itId, itCat);
+                        if (expectedName != null && expectedName.length() > 0
+                                && currentItem != null && !expectedName.equals(currentItem.itemName)) {
+                            remoteSell.reject("item_changed", "Danh sách đồ đã thay đổi; hãy chọn lại món cần bán.");
+                        } else {
+                            sellSingleItem(itId, itCat, isJsonBoolTrue(cmd, "allow_locked"));
+                        }
                         logDebug("sell_single_item command triggered: id=" + itId + " cat=" + itCat);
                     } catch (Exception ex) {
                         logDebug("Lỗi parse sell_single_item: " + ex.getMessage());
@@ -2247,6 +2312,11 @@ public class HsoBridge {
             }
 
             // Lệnh kiểm tra gói tin NPC
+            if (cmd.indexOf("\"cancel_sell\"") != -1) {
+                isAutoSell = false;
+                remoteSell.cancel(System.currentTimeMillis());
+            }
+
             if (cmd.indexOf("\"test_npc_packet\"") != -1) {
                 String subNpc = extractJsonValue(cmd, "npc_id");
                 String subX = extractJsonValue(cmd, "x");
@@ -2257,6 +2327,10 @@ public class HsoBridge {
                 logDebug("TEST NPC PACKET: Gửi getlist_from_npc(" + targetNpcId + ") tại tọa độ (" + tx + "," + ty + ")");
                 int sx = GameScreen.player != null ? GameScreen.player.x : 0;
                 int sy = GameScreen.player != null ? GameScreen.player.y : 0;
+                if (targetNpcId == GrahamNpcMenu.NPC_ID && tx == 0 && ty == 0) {
+                    if (GrahamNpcMenu.show()) GlobalService.gI().remoteSellMenu(targetNpcId);
+                    return;
+                }
                 if (tx > 0 && ty > 0) {
                     spoofMoveTo(tx, ty);
                 }
@@ -2510,6 +2584,7 @@ public class HsoBridge {
             sb.append(",\"farm_distinct_hits\":").append(farmDamagedIds.size());
             sb.append(",\"auto_pickup\":").append(isAutoPickup);
             sb.append(",\"auto_sell\":").append(isAutoSell);
+            sb.append(",\"remote_sell\":").append(remoteSellJson());
             sb.append(",\"speed\":").append(currentSpeedMultiplier);
             sb.append(",\"bot_detected\":").append(botCaptchaDetected);
             sb.append(",\"other_players_count\":").append(otherPlayersInZone);
@@ -2532,6 +2607,7 @@ public class HsoBridge {
 
     private static String escape(String s) {
         if (s == null) return "";
-        return s.replace("\"", "\\\"").replace("\n", " ").replace("\r", "");
+        return s.replace("\\", "\\\\").replace("\"", "\\\"")
+                .replace("\t", "\\t").replace("\n", " ").replace("\r", "");
     }
 }

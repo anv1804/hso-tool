@@ -26,4 +26,7 @@ hso_debug.log
 hso_cmd.json
 HSO301/
 *.bak
+KnightOnline_v403.jar.pending
+hso_remote_sell_probe.log
 patch_bin/
+npc_shop_cache/

@@ -36,6 +36,7 @@ from PIL import Image, ImageTk, ImageDraw
 
 BASE_DIR = Path(__file__).resolve().parent
 JAR_TARGET = BASE_DIR / "KnightOnline_v403.jar"
+JAR_PENDING = BASE_DIR / "KnightOnline_v403.jar.pending"
 JAR_ORIG = BASE_DIR / "KnightOnline_v403.jar.orig"
 CONFIG_FILE = BASE_DIR / "tool_config.json"
 MICROEMU_JAR = BASE_DIR / "microemulator-3.0.0.jar"
@@ -43,6 +44,16 @@ RES_DIR = BASE_DIR / "jar_resources"
 STATE_FILE = BASE_DIR / "client_state.json"
 CMD_FILE = BASE_DIR / "client_command.json"
 CMD_DIR = BASE_DIR / "client_commands"
+
+
+def apply_pending_jar():
+    """Install a verified build staged while Windows held the running JAR open."""
+    if not JAR_PENDING.is_file():
+        return False
+    if JAR_TARGET.is_file() and JAR_TARGET.stat().st_mtime_ns > JAR_PENDING.stat().st_mtime_ns:
+        return False  # A later manual build takes precedence over the staged update.
+    os.replace(JAR_PENDING, JAR_TARGET)
+    return True
 
 def resolve_jdk_tool(tool_name):
     java_home = os.environ.get("JAVA_HOME")
@@ -760,6 +771,9 @@ class HsoStudioApp:
         self.pending_zone_change = None
         self.last_map_id = None
         self.farm_paused_by_safety = False
+        self.pending_sell_until = 0.0
+        self.pending_npc_until = 0.0
+        self.last_sell_status = None
 
         self.btn_renderer = HsoButtonRenderer()
         self.logo_photo = None
@@ -1275,22 +1289,56 @@ class HsoStudioApp:
             self.log_msg("Không gửi được lệnh bộ lọc bán đồ: " + str(e))
 
     def send_sell_now_command(self):
+        if not self.can_start_remote_sale():
+            return
         sell_filter = self.config.get("auto_sell_filter", DEFAULT_CONFIG["auto_sell_filter"])
         cmd = {"action": "sell_now"}
         cmd.update(sell_filter)
         try:
             self.write_command(cmd)
+            self.pending_sell_until = time.monotonic() + 2.0
             self.log_msg("Đã gửi yêu cầu Bán Ngay các món đồ thỏa điều kiện!")
         except OSError as e:
             self.log_msg("Không gửi được lệnh Bán Ngay: " + str(e))
 
-    def send_sell_single_item(self, item_id, item_cat=3, item_name=""):
-        cmd = {"action": "sell_single_item", "id": item_id, "cat": item_cat}
+    def can_start_remote_sale(self):
+        if not self.state_data.get("in_game"):
+            self.log_msg("Chưa vào game: không gửi lệnh bán đồ.")
+            return False
+        if self.state_data.get("remote_sell", {}).get("active") or time.monotonic() < self.pending_sell_until:
+            self.log_msg("Đang có giao dịch bán đồ; hãy chờ server xác nhận.")
+            return False
+        return True
+
+    def send_sell_single_item(self, item_id, item_cat=3, item_name="", allow_locked=False):
+        if not self.can_start_remote_sale():
+            return
+        cmd = {"action": "sell_single_item", "id": item_id, "cat": item_cat,
+               "allow_locked": allow_locked, "item_name": item_name}
         try:
             self.write_command(cmd)
+            self.pending_sell_until = time.monotonic() + 2.0
             self.log_msg(f"Đã gửi lệnh bán từng cái: {item_name} (ID: {item_id})")
         except OSError as e:
             self.log_msg("Không gửi được lệnh bán: " + str(e))
+
+    def open_graham_npc(self):
+        if not self.state_data.get("in_game"):
+            self.log_msg("Chưa vào game: không thể gọi NPC Graham.")
+            return
+        if self.state_data.get("remote_sell", {}).get("active"):
+            self.log_msg("Hãy chờ lượt bán đồ kết thúc trước khi gọi NPC Graham.")
+            return
+        if time.monotonic() < getattr(self, "pending_npc_until", 0.0):
+            return
+        try:
+            # The client displays the last known Graham menu immediately and requests
+            # fresh NPC data. Zero coordinates do not invoke virtual movement.
+            self.write_command({"action": "test_npc_packet", "npc_id": -58, "x": 0, "y": 0})
+            self.pending_npc_until = time.monotonic() + 1.0
+            self.log_msg("Đã gửi yêu cầu mở menu Graham trong game.")
+        except OSError as e:
+            self.log_msg("Không gọi được NPC Graham: " + str(e))
 
     # ==============================================================
     # ==============================================================
@@ -1477,6 +1525,16 @@ class HsoStudioApp:
             command=self.toggle_auto_sell
         )
         self.btn_auto_sell.pack(side="left", fill="x", expand=True)
+
+        self.btn_npc_graham = HsoButton(
+            c_func,
+            text="NPC Graham (Bán đá)",
+            font_size=7,
+            height=23,
+            renderer=self.btn_renderer,
+            command=self.open_graham_npc
+        )
+        self.btn_npc_graham.pack(fill="x", pady=(3, 0))
 
     def redraw_player_bars(self):
         c = self.canvas_player_bars
@@ -1720,6 +1778,7 @@ class HsoStudioApp:
                 "sync": 1 if farm_sync else 0,
                 "ids": ";".join(str(monster_id) for monster_id in ids) if is_configured else ""
             })
+            self.last_farm_signature = signature
         except OSError as e:
             self.log_msg("Không đồng bộ được Auto Fam: " + str(e))
 
@@ -2080,6 +2139,18 @@ class HsoStudioApp:
         # ==============================================================
         # TAB 0: BẢNG DANH SÁCH ĐỒ BÁN (HÀNH TRANG)
         # ==============================================================
+        sale_status_var = tk.StringVar(value="Chưa có giao dịch bán đồ.")
+        sale_status_bar = tk.Frame(body, bg="#1e1109")
+        sale_status_bar.pack(fill="x", pady=(0, 4))
+        tk.Label(sale_status_bar, textvariable=sale_status_var, wraplength=425,
+                 anchor="w", justify="left", font=(FONT_FAMILY, 7),
+                 fg=COLOR_TEXT_GOLD, bg="#1e1109").pack(side="left", fill="x", expand=True)
+        btn_cancel_sale = HsoButton(
+            sale_status_bar, text="Dừng bán", width=70, height=20, font_size=7,
+            renderer=self.btn_renderer,
+            command=lambda: self.write_command({"action": "cancel_sell"}))
+        btn_cancel_sale.pack(side="right", padx=(4, 0))
+
         frame_tab_list = tk.Frame(body, bg="#1e1109")
         frame_tab_list.pack(fill="both", expand=True)
 
@@ -2221,12 +2292,13 @@ class HsoStudioApp:
                     lbl_lock_tag = tk.Label(f_name, text=" [Khoá]", font=(FONT_FAMILY, 7, "bold"), fg="#e74c3c", bg=row_bg)
                     lbl_lock_tag.pack(side="left", padx=2)
 
-                def make_sell_handler(i_id, i_cat, i_name, locked):
+                def make_sell_handler(i_id, i_cat, i_name, locked, item_tier):
                     def do_sell():
-                        if locked:
-                            if not messagebox.askyesno("Xác nhận bán", f"Món đồ '{i_name}' đang có KHÓA BẢO HIỂM.\nBạn có chắc muốn bán không?"):
+                        if locked or item_tier > 0:
+                            protection = "KHÓA BẢO HIỂM" if locked else f"cường hóa +{item_tier}"
+                            if not messagebox.askyesno("Xác nhận bán", f"Món đồ '{i_name}' có {protection}.\nBạn có chắc muốn bán không?", parent=dlg):
                                 return
-                        self.send_sell_single_item(i_id, i_cat, i_name)
+                        self.send_sell_single_item(i_id, i_cat, i_name, allow_locked=locked)
                     return do_sell
 
                 btn_sell_one = HsoButton(
@@ -2237,8 +2309,9 @@ class HsoStudioApp:
                     height=18,
                     gold_text=True,
                     renderer=self.btn_renderer,
-                    command=make_sell_handler(item_id, item_cat, item_name, is_locked)
+                    command=make_sell_handler(item_id, item_cat, item_name, is_locked, tier)
                 )
+                btn_sell_one.set_disabled(bool(self.state_data.get("remote_sell", {}).get("active")))
                 btn_sell_one.pack(side="right", padx=6, pady=3)
 
                 status_text = "[Sẽ bán]" if matches_filter else "[Giữ lại]"
@@ -2456,7 +2529,15 @@ class HsoStudioApp:
             if not dlg.winfo_exists():
                 return
             inv = self.state_data.get("inventory", [])
-            inv_hash = f"{len(inv)}_{sum(x.get('id', 0) for x in inv if isinstance(x, dict))}"
+            sale = self.state_data.get("remote_sell", {})
+            busy = bool(sale.get("active"))
+            sale_status_var.set(sale.get("message", "Đang chờ phiên bản client có hỗ trợ trạng thái bán đồ."))
+            btn_cancel_sale.set_disabled(not busy)
+            btn_sell_junk_top.set_disabled(busy)
+            update_summary()
+            inv_hash = (busy, tuple(tuple(it.get(k) for k in
+                        ("id", "cat", "name", "num", "tier", "lock", "color", "can_sell"))
+                        for it in inv if isinstance(it, dict)))
             if inv_hash != last_inventory_hash[0]:
                 last_inventory_hash[0] = inv_hash
                 refresh_item_list()
@@ -3585,6 +3666,16 @@ class HsoStudioApp:
             messagebox.showinfo("Notice", "Game is already running!")
             return
 
+        try:
+            if apply_pending_jar():
+                self.log_msg("Đã áp dụng bản cập nhật client bán đồ từ xa.")
+        except OSError as e:
+            messagebox.showerror(
+                "Cập nhật client",
+                "Chưa thay được JAR vì bản game cũ còn mở hoặc file đang bị khóa.\n"
+                "Hãy đóng game cũ rồi bấm Play Game để áp dụng bản cập nhật.\n\n" + str(e))
+            return
+
         for required_file in (JAR_TARGET, MICROEMU_JAR):
             if not required_file.is_file():
                 messagebox.showerror("Error", f"Không tìm thấy file game: {required_file}")
@@ -3732,6 +3823,8 @@ class HsoStudioApp:
     # VÒNG LẶP ĐỒNG BỘ DỮ LIỆU THỜI GIAN THỰC (400ms)
     # ==============================================================
     def clear_live_state(self):
+        self.pending_sell_until = 0.0
+        self.last_sell_status = None
         dialog = getattr(self, "auto_farm_dialog", None)
         if dialog is not None and dialog.winfo_exists():
             dialog.destroy()
@@ -3839,6 +3932,13 @@ class HsoStudioApp:
 
     def update_live_data(self, data):
         self.state_data = data
+        sale = data.get("remote_sell", {})
+        sale_status = (sale.get("phase"), sale.get("message"), sale.get("sold_units"))
+        if sale.get("phase") and sale.get("phase") != "idle" and sale_status != self.last_sell_status:
+            self.last_sell_status = sale_status
+            self.log_msg("Bán đồ: " + sale.get("message", ""))
+        if sale.get("active"):
+            self.pending_sell_until = 0.0
         in_game = data.get("in_game", False)
 
         current_pin = data.get("pinned_monster_id", -1)
@@ -4272,7 +4372,62 @@ class HsoStudioApp:
         self.radar_canvas.delete("radar_tooltip")
 
 
+def show_graham_button():
+    """Show the new control beside an already-running tool/game session."""
+    root = tk.Tk()
+    root.title("NPC Graham — Bán đá quý")
+    root.geometry("270x125")
+    root.resizable(False, False)
+    root.configure(bg=COLOR_BG_DARK)
+    root.attributes("-topmost", True)
+    root.geometry(f"+{max(0, root.winfo_screenwidth() - 300)}+{max(0, root.winfo_screenheight() - 300)}")
+    app = HsoStudioApp.__new__(HsoStudioApp)
+    app.state_data = {}
+    app.pending_npc_until = 0.0
+    message = tk.StringVar(value="Bấm nút để gọi menu Graham trong game.")
+    session_name = tk.StringVar(value="Đang đọc trạng thái game…")
+    app.log_msg = message.set
+    renderer = HsoButtonRenderer()
+    tk.Label(root, textvariable=session_name, font=(FONT_FAMILY, 7),
+             fg=COLOR_TEXT_MUTED, bg=COLOR_BG_DARK).pack(fill="x", padx=8, pady=(5, 0))
+    button = HsoButton(root, text="NPC Graham (Bán đá)", font_size=9, height=30,
+                       renderer=renderer, command=app.open_graham_npc)
+    button.pack(fill="x", padx=8, pady=(8, 5))
+    tk.Label(root, textvariable=message, wraplength=250, justify="left",
+             font=(FONT_FAMILY, 8), fg=COLOR_TEXT_GOLD, bg=COLOR_BG_DARK).pack(fill="x", padx=8)
+
+    def poll():
+        try:
+            snapshots = sorted((p for p in (STATE_FILE, STATE_FILE.with_name(STATE_FILE.name + ".tmp"))
+                                if p.exists()), key=lambda p: p.stat().st_mtime_ns, reverse=True)
+            for path in snapshots:
+                if time.time() - path.stat().st_mtime > 5:
+                    continue
+                try:
+                    with path.open(encoding="utf-8") as source:
+                        app.state_data = json.load(source)
+                    break
+                except (OSError, ValueError):
+                    continue
+            else:
+                app.state_data = {}
+        except OSError:
+            app.state_data = {}
+        button.set_disabled(not app.state_data.get("in_game")
+                            or bool(app.state_data.get("remote_sell", {}).get("active")))
+        player = app.state_data.get("player", {})
+        session_name.set(f"{player.get('name', '')} • {app.state_data.get('map_name', '')}"
+                         if app.state_data.get("in_game") else "Chưa vào game")
+        root.after(250, poll)
+
+    poll()
+    root.mainloop()
+
+
 def main():
+    if "--npc-graham" in sys.argv:
+        show_graham_button()
+        return
     root = tk.Tk()
     app = HsoStudioApp(root)
     root.mainloop()

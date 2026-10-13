@@ -513,7 +513,8 @@ extends AvMain {
                     }
                     if (mainObject == GameScreen.player) {
                         long now = System.currentTimeMillis();
-                        boolean isRemoteGuarded = com.silverknight.HsoBridge.isStrikeActive
+                        boolean isRemoteGuarded = com.silverknight.HsoBridge.isRemoteSellPositionGuarded()
+                                || com.silverknight.HsoBridge.isStrikeActive
                                 || (com.silverknight.HsoBridge.lastRemoteMoveTime > 0
                                 && now - com.silverknight.HsoBridge.lastRemoteMoveTime < 3000L);
                         boolean isPinnedActive = (com.silverknight.HsoBridge.pinnedPlayerId != -1 || com.silverknight.HsoBridge.pinnedMonsterId != -1);
@@ -1624,6 +1625,10 @@ extends AvMain {
             String string2 = msg.reader().readUTF();
             byte by = msg.reader().readByte();
             com.silverknight.HsoBridge.logDebug("RECV npcInfo: title/chat='" + string2 + "', type/id=" + by);
+            if (msg.reader().available() >= 2 && com.silverknight.HsoBridge.onRemoteSellShop(by)) {
+                // The server opened a shop. Keep the game screen and camera at the farm location.
+                return;
+            }
             TabShopNew.isTabHopNL = false;
             if (by < 0) {
                 MainObject mainObject = MainObject.get_Object(by, (byte)2);
@@ -2011,6 +2016,9 @@ extends AvMain {
                 GameCanvas.shopNpc.addMoreTab(mVector3);
                 GameCanvas.shopNpc.Show(GameScreen.gI());
                 GameCanvas.end_Dialog();
+                if ("Đồ thương nhân".equalsIgnoreCase(string2)) {
+                    com.silverknight.GrahamNpcMenu.rememberMerchantShop();
+                }
                 if (by == REBUILD || by == REPLACE || by == TAB_HOP_NGUYEN_LIEU) {
                     mainTabNew.init();
                 }
@@ -2611,27 +2619,23 @@ extends AvMain {
             int n = msg.reader().readByte();
             mVector mVector2 = new mVector("ReadMessenge cmd");
             StringBuffer sbOpts = new StringBuffer();
-            int shopIndex = -1;
+            String[] options = new String[n];
             for (int i = 0; i < n; ++i) {
                 String opt = msg.reader().readUTF();
+                options[i] = opt;
                 if (i > 0) sbOpts.append(", ");
                 sbOpts.append(opt);
-                String optLower = opt.toLowerCase();
-                if (optLower.indexOf("mua bán") != -1 || optLower.indexOf("mua ban") != -1 || optLower.indexOf("cửa hàng") != -1 || optLower.indexOf("cua hang") != -1 || optLower.indexOf("shop") != -1) {
-                    shopIndex = i;
-                }
                 iCommand iCommand2 = new iCommand(opt, null);
                 mVector2.addElement(iCommand2);
             }
-            if (shopIndex == -1 && s == -3 && n > 0) {
-                shopIndex = 0;
-            }
             String string = msg.reader().readUTF();
+            com.silverknight.GrahamNpcMenu.remember(s, by, options, string);
+            int shopIndex = com.silverknight.HsoBridge.remoteShopOption(s,
+                    GameScreen.player == null ? -1 : GameScreen.player.clazz, options);
             com.silverknight.HsoBridge.logDebug("RECV Dynamic_Menu: title='" + string + "', idNPC=" + s + ", idMenu=" + by + ", opts=[" + sbOpts.toString() + "]");
-            if (com.silverknight.HsoBridge.isAutoOpeningShop && shopIndex >= 0) {
-                com.silverknight.HsoBridge.logDebug("Tự động chọn option index=" + shopIndex + " để mở Shop...");
-                GlobalService.gI().Dynamic_Menu(s, by, (byte)shopIndex);
-                GameCanvas.menu2.doCloseMenu();
+            if (com.silverknight.HsoBridge.onRemoteSellMenu(s, by, shopIndex)) {
+                // Only the requested merchant's reply belongs to the remote sale.
+                // Send the menu selection from the game loop, not the collector thread.
                 return;
             }
             GameCanvas.menu2.setinfoDynamic(mVector2, 2, by, s, string);
@@ -4572,10 +4576,8 @@ extends AvMain {
             this.typeDialog = msg.reader().readByte();
             String string = msg.reader().readUTF();
             com.silverknight.HsoBridge.logDebug("RECV Dialog_server: '" + string + "' (id=" + this.idDialog + ", type=" + this.typeDialog + ")");
-            if (string != null && string.toLowerCase().indexOf("bạn có muốn bán") != -1) {
-                com.silverknight.HsoBridge.logDebug("Auto-confirming sell dialog: id=" + this.idDialog);
-                GlobalService.gI().dialog_Server(this.idDialog, this.typeDialog, (byte)1);
-                GameCanvas.end_Dialog();
+            com.silverknight.HsoBridge.noteRemoteSellNotice(string);
+            if (com.silverknight.HsoBridge.onRemoteSellDialog(this.idDialog, this.typeDialog, string)) {
                 return;
             }
             mVector mVector2 = new mVector("ReadMessenge vec4");
@@ -5284,6 +5286,7 @@ extends AvMain {
             String string = msg.reader().readUTF();
             byte by = msg.reader().readByte();
             com.silverknight.HsoBridge.logDebug("RECV InfoEasyFromServer: '" + string + "' (type=" + by + ")");
+            com.silverknight.HsoBridge.noteRemoteSellNotice(string);
             if (by == 0) {
                 GameCanvas.addInfoChar(string);
             } else if (by == 1) {

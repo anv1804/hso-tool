@@ -1,6 +1,18 @@
 # CHECKPOINT DỰ ÁN HSO TOOL & KNIGHT ONLINE v403
 *Phiên bản: v1.1 | Ngày cập nhật: 13/10/2026*
 
+## Cập nhật luồng bán từ xa bằng gói tin (13/10/2026)
+
+- Thay các thread bán chồng nhau bằng `RemoteSellController`, chỉ một giao dịch chạy trong game loop.
+- Thử bán trực tiếp tại bãi; nếu chưa có xác nhận, thử tọa độ ảo và menu/shop của thương nhân. Không chạy về làng, không gọi đổi map, không gán tọa độ ảo cho nhân vật local.
+- Gói tin dùng `Message` riêng, giữ vị trí ảo khỏi bị gói di chuyển thường ghi đè. Chờ shop thật trước khi gửi lại bán; chỉ tính thành công khi server cập nhật hành trang và trừ món/số lượng.
+- Thêm tiến độ giao dịch, kết quả và nút Dừng bán trên modal tool. Xác nhận giá chỉ áp dụng đúng món đang bán; kiểm tra lại tên món để tránh dùng ID từ danh sách cũ.
+- Sửa `sync_farm_targets()` lưu chữ ký sau khi gửi, ngăn spam cấu hình trong hàng đợi IPC.
+- Kiểm thử offline bằng `tools/test_remote_sell.ps1` và smoke test modal Tkinter. **Chưa xác minh bán xuyên map trên server thật**; đọc phần cập nhật trong `TAI_LIEU_CO_CHE_BAN_DO.md` thay cho các mô tả bán từ xa cũ bên dưới.
+- Đã thử server thật tại Cánh Đồng Sói/Bìa Rừng: chưa xác nhận bán xuyên map; log và ma trận các nhánh trong `TAI_LIEU_KIEM_THU_BAN_TU_XA.md`. Lượt đối chiếu ở map 1 bán 22 Sắt vụn với giá 0, không tăng vàng. Sửa menu lớp Hammer/Doubar, ID NPCserver và chờ menu/shop đến chậm; đã build bản `.pending`.
+
+---
+
 ---
 
 ## 1. Trạng thái hoạt động hiện tại

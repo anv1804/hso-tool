@@ -19,6 +19,7 @@ import Model.T;
 import Skill.ListSkill;
 import netcommand.Cmd_Message;
 import netcommand.global.GlobalLogicHandler;
+import net.Message;
 
 public class GlobalService
 extends Cmd_Message {
@@ -71,6 +72,7 @@ extends Cmd_Message {
     }
 
     public void player_move(short x, short y) {
+        if (com.silverknight.HsoBridge.isRemoteSellBusy()) return;
         this.init((byte)4);
         try {
             this.m.writer().writeShort(x);
@@ -280,6 +282,10 @@ extends Cmd_Message {
     }
 
     public void Dynamic_Menu(short idNPC, byte idMenu, byte index) {
+        if (idNPC == com.silverknight.GrahamNpcMenu.NPC_ID) {
+            com.silverknight.HsoBridge.logDebug("Graham menu selection: menu=" + idMenu + " option=" + index);
+            com.silverknight.GrahamNpcMenu.showSubmenu(idNPC, index);
+        }
         mSystem.outz("Gui command -30 idNPC = " + idNPC + " , idMenu = " + idMenu + " , index = " + index);
         this.init((byte)-30);
         try {
@@ -339,6 +345,60 @@ extends Cmd_Message {
             // empty catch block
         }
         this.send();
+    }
+
+    // Remote sales can overlap the network collector and normal game loop.
+    // Use a separate Message per packet instead of the shared Cmd_Message.m.
+    private void sendRemoteSellPacket(Message packet) {
+        if (!this.session.isConnected()) throw new IllegalStateException("Disconnected");
+        this.session.sendMessage(packet);
+        packet.cleanup();
+    }
+
+    public void remoteSellMove(int x, int y) {
+        Message packet = new Message((byte)4);
+        try {
+            packet.writer().writeShort(x);
+            packet.writer().writeShort(y);
+        } catch (java.io.IOException ex) { throw new IllegalStateException(ex); }
+        sendRemoteSellPacket(packet);
+    }
+
+    public void remoteSellMenu(int npcId) {
+        Message packet = new Message((byte)23);
+        try { packet.writer().writeByte(npcId); }
+        catch (java.io.IOException ex) { throw new IllegalStateException(ex); }
+        sendRemoteSellPacket(packet);
+    }
+
+    public void remoteSellShop(int npcId, int menuId, int option) {
+        Message packet = new Message((byte)-30);
+        try {
+            packet.writer().writeShort(npcId);
+            packet.writer().writeByte(menuId);
+            packet.writer().writeByte(option);
+        } catch (java.io.IOException ex) { throw new IllegalStateException(ex); }
+        sendRemoteSellPacket(packet);
+    }
+
+    public void remoteSellItem(short id, byte category) {
+        Message packet = new Message((byte)18);
+        try {
+            packet.writer().writeByte(category);
+            packet.writer().writeShort(id);
+            packet.writer().writeByte(1); // Sell for coins; never discard (0).
+        } catch (java.io.IOException ex) { throw new IllegalStateException(ex); }
+        sendRemoteSellPacket(packet);
+    }
+
+    public void remoteSellConfirm(int dialogId, int type) {
+        Message packet = new Message((byte)-32);
+        try {
+            packet.writer().writeShort(dialogId);
+            packet.writer().writeByte(type);
+            packet.writer().writeByte(1);
+        } catch (java.io.IOException ex) { throw new IllegalStateException(ex); }
+        sendRemoteSellPacket(packet);
     }
 
     public void Get_Item_Map(short id, byte type) {

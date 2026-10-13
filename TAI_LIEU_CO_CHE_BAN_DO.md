@@ -85,99 +85,76 @@ Qua cơ chế quét mạng khi nhân vật vào **Làng Sói Trắng (Map ID = 1
 
 ---
 
-## 4. PHÂN TÍCH BẢO MẬT & CƠ CHẾ KIỂM TRA TỪ PHÍA MÁY CHỦ (SERVER-SIDE VALIDATION)
+## 4. PHÂN BIỆT CHẶN Ở CLIENT VÀ ĐIỀU KIỆN TRÊN SERVER
 
-Trong quá trình nghiên cứu gửi gói tin trực tiếp từ các map xa (Map 3: Bìa Rừng, Map 7: Cánh Đồng Sói), các thử nghiệm đã làm sáng tỏ cơ chế chống gian lận (Anti-cheat) của máy chủ HSO:
+Phạm vi bản cập nhật: **bán bằng gói tin và vị trí ảo, giữ nguyên map/khu/tọa độ local**. Không có luồng chạy về làng, đi qua cổng, dùng đá dịch chuyển hoặc sửa `loadmap.idMap` để giả thành công.
 
-### 4.1. Server kiểm tra Map ID và Khoảng cách khi mở Shop
-- **Gói tin gọi Menu (`getlist_from_npc(-3)`)**:
-  - Khi đứng ở Map 3 gửi lệnh gọi Lisa (`id = -3`), máy chủ **vẫn chấp nhận trả về bảng Menu động (`cmd = -30`)**.
-- **Gói tin chọn Mua bán (`Dynamic_Menu(-3, 0, 0)`)**:
-  - Khi client gửi gói tin yêu cầu mở Shop từ Menu động, máy chủ kiểm tra điều kiện nghiêm ngặt:
-    $$\text{player.map\_id} == 1 \quad \text{AND} \quad \text{distance}(\text{player}, \text{Lisa}) \le 120\text{px}$$
-  - Nếu người chơi đang ở map khác (Map 3, Map 7...), máy chủ **lập tức từ chối và hủy phiên giao dịch**, không gửi lại gói tin mở Shop `cmd = 23` (`npcInfo`).
-  - Đây chính là lý do vì sao khi đứng ở Map 3, người chơi bấm tay vào nút `"Mua bán"` thì menu tự động đóng lại mà không mở được giao diện mua bán.
+### 4.1. Lỗi client đã sửa
 
-### 4.2. Gói tin bán đồ (`Opcode 18: delete_Item`) yêu cầu phiên Shop hoạt động
-- Gói tin bán đồ của HSO có cấu trúc:
-  ```java
-  GlobalService.gI().delete_Item(byte cat, short id, byte typedelete);
-  ```
-  - `typedelete = 1`: Bán cho cửa hàng lấy tiền vàng/xu.
-  - `typedelete = 0`: Vứt bỏ/tiêu hủy vật phẩm (không nhận tiền).
-- **Quy tắc máy chủ**: Máy chủ chỉ xử lý `typedelete = 1` khi cờ `player.is_shop_open == true`. Do không thể mở Shop từ map xa, mọi gói tin bán đồ gửi lên độc lập đều bị máy chủ **bỏ qua hoàn toàn (Drop packet)**, trang bị không bị trừ và vàng không tăng.
+- Luồng cũ gửi `delete_Item` sau đúng 300ms dù server chưa gửi menu/shop. Lượt bán mới theo dõi từng trạng thái và chờ phản hồi thực tế.
+- Bán từng món từng tạo một thread, cho phép nhiều lượt đè vị trí và cờ `isAutoOpeningShop` lên nhau. Nay chỉ có một giao dịch hoạt động, chạy trong vòng cập nhật game.
+- Các phương thức thông thường dùng chung `Cmd_Message.m`, dễ bị ghi đè nếu game loop và network collector gửi cùng lúc. Các gói bán từ xa dùng đối tượng `Message` độc lập.
+- Vị trí ảo trước đây bị gói di chuyển thường ghi đè hoặc bị `objectMove` kéo nhân vật local đi. Nay chặn gói di chuyển thường trong giao dịch và bỏ qua phản hồi vị trí của chính nhân vật trong ngữ cảnh đó.
+- Luồng cũ xác nhận mọi hộp thoại chứa câu “Bạn có muốn bán”. Nay chỉ xác nhận hộp thoại của món đang chờ bán trong giao dịch hiện tại. Đồ khóa cần quyền `allow_locked` từ xác nhận trên tool hoặc bộ lọc cho phép đồ khóa.
+- Đếm nhặt/xóa đồ theo số ô là chưa đủ: nguyên liệu có thể chỉ giảm số lượng. Nay một phản hồi hành trang và số lượng giảm cũng xác nhận một lượt bán.
 
-### 4.3. Các NPC trên map đánh quái không có chức năng Shop
-- Trên Map 3 (Bìa Rừng) chỉ tồn tại 4 NPC:
-  - `Miss Keva (id = -90)`: NPC Nạp thẻ (`MENU - Cổng nạp`).
-  - `Mr Edgar (id = -85)`: NPC Phó bản / Nhiệm vụ.
-  - `Cột Khu (id = -43, id = -45)`: NPC Chuyển khu vực (Zone).
-- Không thể "mượn" các NPC này để bán đồ vì máy chủ phân quyền chức năng cứng cho từng ID NPC. Gửi lệnh tới Keva sẽ chỉ mở bảng Nạp thẻ, gửi tới Edgar chỉ mở bảng Phó bản.
+### 4.2. Những gì gói tin thực sự chứa
 
----
+| Gói gửi | Payload |
+| --- | --- |
+| `4: player_move` | `short x`, `short y` |
+| `23: getlist_from_npc` | `byte npcId` |
+| `-30: Dynamic_Menu` | `short npcId`, `byte menuId`, `byte option` |
+| `18: delete_Item` | `byte category`, `short itemId`, `byte 1` (bán lấy vàng) |
+| `-32: dialog_Server` | `short dialogId`, `byte dialogType`, `byte 1` (xác nhận) |
 
-## 5. KIẾN TRÚC MÃ NGUỒN ĐÃ HOÀN THIỆN
+Các gói gọi NPC/bán đồ **không có trường map ID hoặc tọa độ NPC**. Tạo NPC/modal giả hoặc sửa map ID trong bộ nhớ client không thay đổi map của nhân vật trên server. Không gửi thêm các byte ngoài cấu trúc giao thức để tránh làm sai gói tin.
 
-Hệ thống đã được tái cấu trúc hoàn chỉnh trên cả Client Java và Tool điều khiển Python:
+Log thử nghiệm trước bản cập nhật có menu Lisa ở map xa nhưng không có phản hồi mở shop tương ứng, và item không bị trừ. Điều này cho thấy giao dịch chưa được server chấp nhận; log không chứng minh chính xác công thức khoảng cách hay tên biến kiểm tra nội bộ của server. Repo chỉ có client Java/C#, không có source server.
 
-### 5.1. Client Java (`HsoBridge.java` & `ReadMessenge.java`)
+## 5. LUỒNG BÁN TỪ XA HIỆN TẠI
 
-1. **Bộ lọc thương nhân hợp lệ ([`HsoBridge.isShopNpc`](file:///home/anv/Documents/tools/hso-tool/src_java/com/silverknight/HsoBridge.java))**:
-   - Chỉ nhận diện NPC có tên `Lisa`, `Emma`, `Doubar`, `Hammer` hoặc đối thoại chứa `Cửa hàng`, `Shop`, `Mua bán`. Loại bỏ hoàn toàn nguy cơ click nhầm Miss Keva (Cổng nạp).
+Mã điều phối: `src_java/com/silverknight/RemoteSellController.java`.
 
-2. **Cờ trạng thái phiên mở Shop ([`HsoBridge.isAutoOpeningShop`](file:///home/anv/Documents/tools/hso-tool/src_java/com/silverknight/HsoBridge.java))**:
-   - Khi tiến trình bán kích hoạt, cờ `isAutoOpeningShop = true` được bật.
-   - Khi máy chủ gửi Menu động (`Dynamic_Menu`, opcode `-30`), Client tự động quét tìm tùy chọn `"Mua bán"` (index 0) và tự gửi lệnh chọn `Dynamic_Menu` ngay trong vòng 5ms mà không cần người dùng thao tác chuột.
+1. Chụp danh sách món theo bộ lọc hoặc món người dùng chọn, giữ ID/category/tên/số lượng. Một giao dịch chỉ xử lý danh sách này, không bán vô hạn các món mới nhặt.
+2. Tạm ngưng gửi farm/loot/quét quái và auto gốc trong giao dịch; giữ cờ Auto Attack/Auto Loot để vòng lặp tiếp tục sau khi hoàn tất.
+3. Thử đúng một gói bán trực tiếp tại bãi treo, `typedelete=1`. Chờ tối đa 4 giây.
+4. Nếu chưa có xác nhận: thử NPC thương nhân thực sự có trên map trước; sau đó thử ID Lisa, Hammer, Doubar. Gửi tọa độ ảo theo bước tối đa 36px, mỗi 40ms, đứng cạnh NPC thay vì bên trong ô vật cản. Không gán tọa độ đó cho nhân vật local/camera. Không gửi tọa độ sát các cổng chuyển map hoặc ngoài biên map.
+5. Gọi menu NPC, chờ tối đa 10 giây. Chọn đúng `menuId` và `option` server trả về với nhãn mua bán/shop; Hammer/Doubar hỗ trợ chọn đúng lớp nhân vật. Không mặc định chọn mục 0 của NPC khác.
+6. Chờ tối đa 6,5 giây cho phản hồi shop `npcInfo`. Chỉ nhận các kiểu shop NPC 0, 1, 4, 100, không nhận rương/tóc/chợ người chơi. Shop được nhận ở nền, không mở màn hình shop che bãi farm.
+7. Khi có phản hồi shop thật, kiểm tra lại hành trang/bộ lọc rồi gửi bán. Món còn trong túi mà server không xác nhận sẽ không được tính là bán thành công.
+8. Với từng món: chờ phản hồi hành trang opcode 16 và kiểm tra item biến mất hoặc số lượng giảm. Nghỉ ít nhất 250ms trước lượt tiếp theo. Phản hồi bán trực tiếp đến muộn trong lúc mở shop được xử lý trước, tránh gửi lại món đã bán.
+9. Khi xong, lỗi hoặc hủy: hoàn trả vị trí server về tọa độ local hiện tại bằng gói di chuyển; không sửa tọa độ local. Giao dịch tối đa 120 giây; việc hoàn trả có giới hạn riêng.
+10. Nếu nhân vật đổi map/khu/login hoặc mất kết nối: hủy giao dịch, không gửi tọa độ cũ sang ngữ cảnh mới. Nếu người dùng tự di chuyển hoặc nhân vật chết: ngừng gửi bán.
 
-3. **Tự động xác nhận hộp thoại giá bán ([`ReadMessenge.Dialog_server`](file:///home/anv/Documents/tools/hso-tool/src_java/netcommand/global/ReadMessenge.java))**:
-   - Khi bán đồ khóa hoặc đồ có xác nhận giá, máy chủ gửi gói `cmd = -32` (`Dialog_server: "Bạn có muốn bán [Tên món] với giá X Vàng không ?"`).
-   - Hàm `Dialog_server` tự động bắt chuỗi và gửi gói xác nhận `GlobalService.gI().dialog_Server(idDialog, typeDialog, (byte)1)` ngay lập tức, giúp đồ được bán thành công 100%.
+Tất cả gói bán đều dùng `typedelete=1`. Không có fallback vứt đồ (`typedelete=0`) và không xóa item/cộng tiền giả ở client.
 
-4. **Tự động dọn dẹp giao diện (UI Clean-up)**:
-   - Khối `finally` trong `sellSingleItem` và `sellMatchingItems` luôn gọi `GameCanvas.end_Dialog()` và `GameCanvas.menu2.doCloseMenu()`, đảm bảo không để lại bất kỳ bảng thông báo hay popup nào trên màn hình game.
+### Trạng thái trên HSO Tool
 
-### 5.2. Tool điều khiển Python (`hso_tool.py`)
+`client_state.json.remote_sell` chứa `active`, `phase`, `message`, `error`, `sold_items`, `sold_units`, `total_items`. Modal bán đồ hiển thị tiến độ, kết quả xác nhận và nút **Dừng bán**. Nút này dừng giao dịch và tắt Auto Sell; gói đã gửi trước khi hủy vẫn có thể được server xử lý.
 
-1. **Bảng Danh Sách Đồ Bán (Hành Trang)**:
-   - Hiển thị danh sách trang bị theo màu sắc, phẩm cấp, cấp độ, số lượng và trạng thái.
-   - Sửa lỗi hiển thị trùng lặp nhãn `[Khoá] [Khoá]`.
-   - Nút **[ Bán ]** từng món và nút **[ Bán rác lần lượt ]** gửi lệnh JSON tuần tự xuống Java Client.
+Auto Sell thử theo chu kỳ 3 giây khi rảnh. Nếu giao dịch thất bại, khoảng cách thử tự động được tăng lên 60 giây để tránh spam. Người dùng vẫn có thể bấm bán lại chủ động.
 
-2. **Bộ lọc Auto Sell an toàn**:
-   - Lọc theo màu sắc: Trắng, Xanh, Vàng, Tím, Cam.
-   - Tùy chọn `tier0_only`: Chỉ bán trang bị +0, tuyệt đối không bán đồ đã nâng cấp (+1 trở lên).
-   - Tùy chọn `unlocked_only`: Có thể bật/tắt bán đồ khóa an toàn.
+### Khi server không cho bán xuyên map
 
----
+Nếu bán trực tiếp không có xác nhận và tất cả lựa chọn vị trí ảo/menu không trả shop, trả lỗi `remote_shop_unavailable`. Nếu shop đã mở nhưng item không bị trừ sau thời gian chờ, trả `sale_not_confirmed`. Hiển thị kèm thông báo liên quan của server nếu có.
 
-## 6. LỘ TRÌNH PHÁT TRIỂN TIẾP THEO: AUTO VỀ LÀNG BÁN ĐỒ RỒI QUAY LẠI BÃI
+Sửa client không thể bảo đảm bỏ được kiểm tra map/quyền mua bán trên một server do bên khác quản lý. Bản này thực hiện các phương án của giao thức hiện có và báo đúng kết quả, không tự chuyển map. **Chưa xác nhận bán xuyên map trên server thật sau bản cập nhật**; cần mở client JAR mới để kiểm tra phản hồi thực tế.
 
-Vì máy chủ HSO bắt buộc nhân vật phải hiện diện tại Làng Sói Trắng mới mở được Shop Lisa, phương án tối ưu và hoàn hảo nhất cho việc cày cuốc tự động (AFK Farm) là tính năng: **Tự Động Về Làng Bán Đồ Qua Cổng Dịch Chuyển (Waypoint Travel & Auto Sell)**.
+## 6. KIỂM THỬ VÀ BUILD
 
-### Quy trình thiết kế:
+Kết quả thử server thật tại map 7, map 3 và lượt đối chiếu ở map 1 được ghi trong [TAI_LIEU_KIEM_THU_BAN_TU_XA.md](TAI_LIEU_KIEM_THU_BAN_TU_XA.md). **Chưa có lượt bán xuyên map được xác nhận**; lượt bán ở map 1 trừ 22 Sắt vụn với giá server báo 0 vàng.
 
-```
-[Bãi Train (Map 3 / Map 7)]
-  │
-  ├─ 1. Hành trang đầy (>= 40/42 ô) hoặc Người dùng bấm "Bán tất cả"
-  ├─ 2. Lưu tọa độ bãi train hiện tại: (farmMapId, farmArea, farmX, farmY)
-  ├─ 3. Di chuyển nhanh tới Waypoint cổng chuyển map dẫn về Làng Sói Trắng (x=936, y=252 trên Map 3)
-  │
-  ▼
-[Cổng chuyển map kích hoạt ──► Sang Map 1 (Làng Sói Trắng)]
-  │
-  ├─ 4. Di chuyển tới Lisa tại tọa độ (x=756, y=120)
-  ├─ 5. Mở shop và bán tuần tự toàn bộ trang bị rác theo bộ lọc (Mỗi món cách nhau 200ms)
-  ├─ 6. Sau khi bán xong, túi đồ được dọn trống, vàng được thu thập đầy đủ
-  ├─ 7. Di chuyển tới Waypoint cổng chuyển map quay trở lại Map train cũ
-  │
-  ▼
-[Quay lại Map Train cũ]
-  │
-  └─ 8. Chạy về đúng tọa độ bãi quái (farmX, farmY) đã lưu và tự động tiếp tục đánh quái!
+Chạy trên Windows:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/test_remote_sell.ps1
 ```
 
-### Ưu điểm vượt trội:
-- **100% Hợp lệ với máy chủ**: Không vi phạm bất kỳ cơ chế kiểm tra khoảng cách nào, không bao giờ bị phát hiện bất thường.
-- **Tốc độ cực nhanh**: Toàn bộ chu trình đi về, bán sạch đồ và quay lại chỉ mất từ **3 - 5 giây**.
-- **Hoàn toàn tự động**: Người chơi có thể cắm máy 24/7 mà không lo bị kẹt đồ hay tràn hành trang.
+Script biên dịch toàn bộ client, kiểm thử bộ điều phối bằng transport mô phỏng, kiểm tra byte thực tế của các gói qua `GlobalService`, và kiểm thử IPC/tool Python. Không đăng nhập hoặc bán vật phẩm trên tài khoản thật.
+
+Các trường hợp kiểm thử bao gồm: bán trực tiếp thành công, menu đến chậm, shop bị từ chối, chọn sai NPC, nguyên liệu giảm số lượng, bán nhiều món tuần tự, bấm lặp, xác nhận đúng món, đổi map/mất kết nối, hủy, ID vật phẩm thay đổi và lỗi gửi gói.
+
+Sau khi sửa Java, build/repack bằng script của dự án hoặc nút Repack JAR. Client đang chạy không tự nạp class mới; cần đóng/mở game để dùng bản JAR đã cập nhật.
+
+Nếu Windows khóa JAR vì game cũ đang mở, bản đã build được lưu ở `KnightOnline_v403.jar.pending`. Đóng cả game và tool cũ, mở lại `run_tool.bat` rồi bấm **Play Game**: tool tự áp dụng bản chờ trước khi khởi chạy. Không cần sao chép file bằng tay. Bản build thủ công có thời gian sửa mới hơn được ưu tiên hơn bản chờ.

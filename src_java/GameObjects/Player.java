@@ -460,7 +460,8 @@ extends MainObject {
         if (n >= 20 && mSystem.currentTimeMillis() - this.timeSendmove >= 120L) {
             bl = true;
         }
-        if (com.silverknight.HsoBridge.isStrikeActive
+        if (com.silverknight.HsoBridge.isRemoteSellBusy()
+                || com.silverknight.HsoBridge.isStrikeActive
                 || (com.silverknight.HsoBridge.lastRemoteMoveTime > 0
                 && mSystem.currentTimeMillis() - com.silverknight.HsoBridge.lastRemoteMoveTime < 1200)) {
             // Đang trong thời gian đánh từ xa -> Không gửi move đè lên!
@@ -475,7 +476,8 @@ extends MainObject {
         }
 
         // Đảm bảo gửi tọa độ portal chính xác lên server khi chạm điểm chuyển map
-        if (Thread_More.LoadMap.vecPointChange != null && !this.isMoveOut) {
+        if (!com.silverknight.HsoBridge.isRemoteSellBusy()
+                && Thread_More.LoadMap.vecPointChange != null && !this.isMoveOut) {
             for (int i = 0; i < Thread_More.LoadMap.vecPointChange.size(); ++i) {
                 Model.Point pt = (Model.Point)Thread_More.LoadMap.vecPointChange.elementAt(i);
                 if (pt != null) {
@@ -492,7 +494,7 @@ extends MainObject {
                 }
             }
         }
-        if (autoItem != null && GameCanvas.gameTick % 5 == 0) {
+        if (!com.silverknight.HsoBridge.isRemoteSellBusy() && autoItem != null && GameCanvas.gameTick % 5 == 0) {
             this.autoGetItem();
         }
         if (!com.silverknight.HsoBridge.isFarmAttackActive()
@@ -617,6 +619,7 @@ extends MainObject {
     }
 
     public void setAutoFire() {
+        if (com.silverknight.HsoBridge.isRemoteSellBusy()) return;
         Object object;
         int n;
         if (com.silverknight.HsoBridge.isFarmAttackActive() && com.silverknight.HsoBridge.pinnedMonsterId == -1) return;
@@ -1144,6 +1147,7 @@ extends MainObject {
     }
 
     public void setStartSkill(int id, boolean isset) {
+        if (com.silverknight.HsoBridge.isRemoteSellBusy()) return;
         if (com.silverknight.HsoBridge.isFarmAttackActive() && com.silverknight.HsoBridge.pinnedMonsterId == -1 && com.silverknight.HsoBridge.pinnedPlayerId == -1) return;
         this.posTransRoad = null;
         if (GameScreen.ObjFocus == null) {
@@ -1395,6 +1399,7 @@ extends MainObject {
     }
 
     public void dofire() {
+        if (com.silverknight.HsoBridge.isRemoteSellBusy()) return;
         if (com.silverknight.HsoBridge.isFarmAttackActive()) {
             return;
         }
@@ -1418,6 +1423,7 @@ extends MainObject {
     }
 
     public void dofire_() {
+        if (com.silverknight.HsoBridge.isRemoteSellBusy()) return;
         if (com.silverknight.HsoBridge.isFarmAttackActive()) {
             return;
         }

@@ -207,14 +207,13 @@ Hệ thống bao gồm 2 thành phần chính hoạt động song song và đồ
 
 ## 7. TỰ ĐỘNG BÁN ĐỒ TỪ XA (REMOTE AUTO SELL & COIN HARVEST)
 
-### 7.1. Bối cảnh & Nguyên lý hoạt động
-- **Thực tế trong game**: Bình thường người chơi phải chạy bộ về Làng Sói Trắng, đối thoại với NPC Lisa, mở menu "Mua bán", click vào từng món trong túi đồ rồi chọn "Bán" và xác nhận. Khi train quái ở map xa, hành trang nhanh chóng đầy đồ rác (trắng, xanh), khiến người chơi mất rất nhiều thời gian di chuyển đi về.
-- **Nguyên lý mạng**: Trong kiến trúc game Hiệp Sĩ Online, gói tin bán đồ cho cửa hàng (`GlobalService.delete_Item`) sử dụng opcode `18` (`Cmd_Message.DEL_ITEM`):
-  ```java
-  GlobalService.gI().delete_Item((byte)item.ItemCatagory, (short)item.Id, (byte)1);
-  ```
-  - Tham số: `type` (`ItemCatagory`), `id` (`item.Id`), `typedelete = 1` (1 = bán cho shop để lấy vàng/xu, 0 = vứt bỏ/xóa đồ).
-  - **Khám phá quan trọng**: Máy chủ HSO xử lý gói tin opcode 18 độc lập, **không kiểm tra khoảng cách đối với NPC Lisa** và **không yêu cầu đang mở giao diện Shop**. Gói tin này lập tức bán trang bị, trừ khỏi hành trang và cộng tiền vàng (`GameScreen.player.coin`) cho nhân vật ngay tại vị trí người chơi đang đứng!
+### 7.1. Luồng giao dịch bán từ xa
+- Bán lấy vàng dùng opcode 18, `delete_Item(category, id, 1)`; không dùng kiểu vứt đồ 0.
+- `RemoteSellController` điều phối một giao dịch trong game loop: thử bán trực tiếp; nếu chưa xác nhận thì thử vị trí ảo và chuỗi menu NPC -> lựa chọn mua bán -> phản hồi shop -> bán tuần tự.
+- Giữ nguyên map và vị trí local/camera; không chạy về làng hoặc dùng cổng dịch chuyển.
+- Chỉ tính thành công khi có phản hồi hành trang từ server và món bị trừ/xóa. Menu hoặc modal cục bộ không chứng minh server đã mở shop.
+- Điều kiện map/quyền mua bán do server quyết định. Bản client mới có kiểm thử mô phỏng, chưa xác nhận bán xuyên map trên server thật.
+- Xem `TAI_LIEU_CO_CHE_BAN_DO.md` để biết các trạng thái, timeout, gói tin và giới hạn thực tế.
 
 ### 7.2. Giao diện & Modal cấu hình Auto Bán Đồ
 - Nằm ngay dưới hàng Auto Loot trên Right Sidebar:
@@ -234,10 +233,10 @@ Hệ thống bao gồm 2 thành phần chính hoạt động song song và đồ
 - **Tùy chọn bảo vệ an toàn tuyệt đối**:
   - 🔒 **Chỉ bán đồ +0 (`tier0_only = True`)**: Bảo vệ 100% trang bị đã cường hóa (+1, +2, +3,...), không bao giờ bán nhầm đồ đang nâng cấp.
   - 🛡️ **Không bán đồ có khóa (`unlocked_only = True`)**: Không bao giờ bán trang bị hoặc vật phẩm có biểu tượng khóa bảo hiểm (`item.isLock > 0`).
-  - 🛡️ **Kiểm tra quyền bán (`canSell == 1`)**: Chỉ bán đồ được game cho phép bán cho thương nhân, bỏ qua đồ nhiệm vụ hay đồ không bán được.
+  - Chỉ chọn trang bị và nguyên liệu; server quyết định món có bán được hay không. Không coi `canSell` bằng 0 trong snapshot cũ là bằng chứng đủ để chặn bán ở client.
 - **Nút thao tác nhanh**:
   - `[ Đồ rác (Trắng+Xanh) ]`: Tự động tick chọn đồ trắng và xanh, bỏ chọn các phẩm cấp quý hơn.
-  - `[ 💰 BÁN NGAY ]`: Lập tức quét túi và gửi chuỗi gói tin bán toàn bộ các món đồ thỏa mãn bộ lọc hiện tại (mỗi món cách nhau 120ms an toàn) mà không cần bật Auto Sell liên tục.
+  - `[ 💰 BÁN NGAY ]`: Lập tức quét túi và gửi chuỗi gói tin bán toàn bộ các món đồ thỏa mãn bộ lọc hiện tại (chờ xác nhận từng món, sau đó nghỉ tối thiểu 250ms) mà không cần bật Auto Sell liên tục.
   - `[ LƯU CẤU HÌNH ]`: Lưu cấu hình và đồng bộ xuống client.
 
 ---
