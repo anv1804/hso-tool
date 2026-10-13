@@ -78,3 +78,57 @@ Repo chỉ có client Java/C#, không có code server. Chưa biết chính xác 
 - Lượt thử do người dùng thao tác ngoài map: 21:30:04/05/08 gửi mua type 0, ID 82, số lượng 1, nhưng không nhận cập nhật hành trang/vàng xác nhận trong cửa sổ thử. Không tính là mua thành công. Catalog được tách cho hai mục mở shop (0/2); mục `Bán đá quý` không được thay bằng phản hồi bán giả. Các lần người dùng tự đổi map/nhận vàng khác sau đó không được quy cho chức năng từ xa.
 
 Các ID thương nhân bổ sung được đối chiếu với [MenuController của server HSO công khai](https://github.com/ALKAstraverse/hso-server/blob/main/src/main/java/core/MenuController.java). Bản tham khảo này có nhiều khác biệt với phản hồi live và không được coi là source của server đang chơi.
+
+## Kiểm tra Mr Dylan sau khi thêm nút — 22:27:51–22:28:04
+
+JVM 17240, tài khoản phuctien, map 8/khu hiển thị 6 (`area=5`), local `(246,786)`. NPC -57 không có trong danh sách NPC quét được trên map này.
+
+- Gửi opcode 23, payload `C7`; server trả menu thật: NPC -57, menu 0, lựa chọn 0 `Mua bán`.
+- Gọi `GlobalService.Dynamic_Menu(-57,0,0)` qua đường gốc. Hook tại session ghi nhận đúng opcode -30 và payload `FF C7 00 00`; không có phản hồi shop opcode 23 loại không âm trong 6,5 giây.
+- Gọi `GlobalService.remoteSellShop(-57,0,0)` bằng Message riêng để loại trừ một trường hợp tranh chấp message dùng chung. Payload tại session vẫn đúng `FF C7 00 00`; không có phản hồi shop trong 6,5 giây tiếp theo.
+- Không ghi nhận dialog/thông báo nêu lý do trong lượt này. Chưa xác định chính xác điều kiện server kiểm tra, không coi timeout là lời từ chối tường minh.
+- Diagnostic chỉ gọi menu/mục Mua bán, không gửi tọa độ, đổi map/khu, mua/bán hoặc xác nhận dialog. Sau khi kết thúc đã trả lại session/handler gốc. Vàng trước lượt là 66.565; thay đổi tiền trước lượt thuộc hoạt động khác của người dùng.
+
+Source: `tools/diagnostics/HsoDylanMenuProbe.java`; manifest: `dylan-menu-manifest.mf`. Các dòng log có tiền tố `DYLAN_PROBE`. Không đưa menu cứng hoặc catalog shop giả cho Dylan vào client.
+
+Kết luận: lần thử chứng minh menu root có phản hồi thật và hai đường gửi lựa chọn đều có payload đúng ở lớp session. Chưa xác nhận shop Dylan mở từ xa; chưa có bản sửa được xác minh cho trường hợp khác map. Không chứng minh mọi biến thể giao thức đều không thể hoạt động.
+
+## Lặp lại một giao dịch Saphia được người dùng yêu cầu — 22:38:03–22:38:09
+
+Người dùng tự đến Cửa Biển (map 19), mở shop và mua một viên Saphia, rồi yêu cầu gửi lại gói tin để lặp thao tác. Tài khoản đang dùng đã đổi sang `lronic`, cấp 99, vai trò thương nhân. Lượt tự động bắt đầu ở map 19/area 5, local `(996,234)`, vàng 236.885.
+
+**Đã mua thêm đúng một viên bằng gói tin tại map có Dylan. Không phải bằng chứng mua xuyên map.**
+
+| Bước | Chiều/opcode | Payload hoặc phản hồi |
+| --- | --- | --- |
+| Yêu cầu menu Dylan | TX 23 (`0x17`) | `C7`: byte NPC -57 |
+| Menu server trả | RX -30 | NPC -57, **menu ID 2**, lựa chọn 0 `Mua bán` |
+| Chọn Mua bán | TX -30 (`0xE2`) | **`FF C7 02 00`**: short -57, byte menu 2, byte index 0 |
+| Shop server trả | RX 23 | Tiêu đề đúng log `Của hàng đá quý`, type **1**, một món Saphia |
+| Mua một Saphia | TX 24 (`0x18`) | **`01 0E 06 00 01`**: byte typebuy 1, short ID **3590**, short số lượng 1 |
+| Cập nhật tiền | RX 16 | Vàng **236.885 → 226.885** |
+| Thông tin tồn kho Dylan | RX 23, type/id -57 | Log trước lượt báo 199 viên; sau lượt báo **198 viên** |
+
+Diagnostic lấy menu ID/lựa chọn từ phản hồi server mới, rồi lấy ID món/giá/loại tiền từ màn hình shop thật vừa nhận. Chỉ mua khi tên chính xác `Saphia`, giá đúng 10.000 vàng, typebuy 1, tài khoản/số dư/map còn đúng. Chỉ có một lần gửi mua, không retry gói 24, không trả lời dialog, không di chuyển/đổi map. Handler đã được trả lại sau lượt thử.
+
+Source: `tools/diagnostics/HsoDylanPurchaseReplay.java`; manifest: `dylan-purchase-manifest.mf`. Log có tiền tố `DYLAN_REPLAY`. Payload shop thật lưu ở thư mục bỏ qua bởi Git: `patch_bin/dylan_replay/server-shop-payload.bin`. Các hex là payload trước đóng khung/mã hóa session.
+
+Điểm khác biệt cần kiểm tra tiếp: menu ngoài map 8 trước đó trả ID **0**, nhưng ở map 19 trả ID **2**. Không mặc định mọi menu Dylan đều có ID 0. Chưa thử ID 2 khi đứng ngoài map 19 trong lượt này và chưa kết luận chỉ đổi menu ID sẽ vượt được điều kiện server.
+
+## Mua thêm một viên và đối chứng cùng tài khoản ngoài map Dylan
+
+- Theo yêu cầu tiếp theo, 22:40:43–22:40:58 mua thêm đúng một viên tại map 19, vẫn là lronic: menu 2, opcode 24 payload `01 0E 06 00 01`; RX 16 cập nhật vàng 226.885 → 216.885, tồn kho Dylan 198 → 197. Handler đã được trả về sau lượt thử.
+- Người dùng tự sang map 8. Lượt 22:53:58–22:54:14 chỉ kích hoạt khi người dùng chọn Mua bán của Dylan. Root thật trả menu 0; hook thay một gói -30 bằng `FF C7 02 00`. Không nhận shop trong 6,5 giây, sau đó thử đúng một gói mua `01 0E 06 00 01` theo yêu cầu đối chứng. Không có cập nhật hành trang xác nhận trong 10 giây sau mua, vàng giữ 216.885. Không ghi nhận thông báo nêu lý do. Không dựng shop/cache giả, không đổi vị trí/map, không retry mua; hook đã được gỡ.
+- Như vậy đổi menu ID 0 → 2 và gửi lại gói mua đúng chưa giải quyết được trường hợp map 8 trong lượt này. Chưa xác định chính xác điều kiện server kiểm tra và chưa xác nhận mua từ xa.
+
+Cấu trúc đầy đủ các gói gửi/nhận, payload shop 53 byte và các điều kiện đã biết/chưa biết được ghi trong `TAI_LIEU_GOI_TIN_SHOP_DYLAN.md`.
+
+## Nhánh bán đá trong thú đi buôn — type 50
+
+Theo thông tin người dùng cung cấp, bán hàng cho Graham cần `dialog_Server(dialogId,50,1)` (opcode -32), khác opcode 18 bán đồ hành trang. Đã bắt được lượt bán thật của lronic tại map 8: dialog ID -6979/type50 hỏi bán tất cả giá 20.000, rồi opcode 16; snapshot vàng 226.885, tăng 20.000 so với số dư trước khi người dùng về Graham. ID actor đổi sau khi mở lại game; không giữ -8209/-6979 như ID cố định.
+
+Theo yêu cầu tiếp theo, 23:32 mua đúng một Saphia tại Dylan/map 19, nhận shop thật và opcode 37 `Đã mua Saphia`, vàng 226.885 → 216.885. Giữ nguyên `(972,198)`, bò 8299 gần nhân vật; gửi root Graham, chọn menu0/index1, xác nhận50 ID hiện tại -6979 ngay cùng lượt: chưa nhận tiền/cập nhật xác nhận, bò còn.
+
+Thử thêm vị trí ảo với cùng hàng, không mua thêm: bản có tìm đường dừng trước bán vì không có route trên map 19; bản packet-only gửi 44 bước 24px/60ms đến `(150,804)`, chọn Graham và xác nhận50, rồi gửi hoàn trả. Không có xác nhận bán; vàng giữ 216.885, cuối lượt local/map vẫn `(972,198)`/19. Có phản hồi self-position trong lúc hoàn trả, nên không khẳng định server đã chấp nhận endpoint ảo. Handler/cờ điều khiển được khôi phục.
+
+Chi tiết các gói, sự khác biệt giữa ID và ngữ cảnh dialog, scope bán tất cả và kết quả từng lượt: `TAI_LIEU_BAN_DA_QUY_GRAHAM.md`.

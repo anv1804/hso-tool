@@ -19,11 +19,24 @@ Các index bắt đầu từ 0. Không suy ra tác dụng trên server chỉ t�
 
 ## 2. Nút trên tool gọi như thế nào?
 
-Nút **NPC Graham (Bán đá)** nằm dưới Auto Sell. Nó gọi `HsoStudioApp.open_graham_npc()` trong `hso_tool.py` và ghi lệnh vào hàng đợi `client_commands`:
+Nút **Gọi menu NPC** nằm dưới Auto Sell. Nó gọi `HsoStudioApp.open_npc_menu_modal()` trong `hso_tool.py` để mở modal chứa hai nút:
+
+- **Graham (ID: -58)**: giữ cơ chế Graham hiện tại qua `open_graham_npc()`.
+- **Mr Dylan (ID: -57)**: gửi yêu cầu menu server qua `open_mr_dylan_npc()`, không thêm menu dựng cứng hay cache riêng cho Mr Dylan.
+
+Cả hai dùng `open_npc_menu(npc_id, npc_name)` để ghi lệnh vào hàng đợi `client_commands`. Ví dụ Graham:
 
 ```json
 {"action":"test_npc_packet","npc_id":-58,"x":0,"y":0}
 ```
+
+Với Mr Dylan, lệnh tương ứng là:
+
+```json
+{"action":"test_npc_packet","npc_id":-57,"x":0,"y":0}
+```
+
+Client hiện có sẵn nhánh gọi NPC này bằng `getlist_from_npc(-57)` (opcode 23, payload `C7`). Menu Mr Dylan chỉ hiện khi server trả phản hồi. Modal đóng sau khi gửi lệnh thành công; thao tác gửi thành công không đồng nghĩa server đã trả menu hoặc cho phép giao dịch.
 
 `write_command()` ghi file `.tmp` rồi đổi tên sang `.json` để Java đọc lệnh hoàn chỉnh. Python kiểm tra đã vào game, không có lượt bán đang chạy và giới hạn mỗi lần bấm cách nhau ít nhất 1 giây.
 
@@ -208,3 +221,5 @@ Kiểm thử offline/build thành công chỉ xác nhận code chạy theo kiể
 | `TAI_LIEU_KIEM_THU_BAN_TU_XA.md` | Kết quả các hướng đã thử và giới hạn kết luận |
 
 Luồng hiện tại là: **bấm nút → dựng menu local + gửi yêu cầu 23 → bấm lựa chọn → thử hiện shop cache + gửi -30 → thao tác mua gửi 24 → chờ server xác nhận**. Phần còn thiếu là giao dịch được server chấp nhận khi nhân vật ở ngoài map phù hợp.
+
+Đối với **Bán đá quý trong thú đi buôn**, người dùng cung cấp thêm hướng xác nhận `dialog_Server(dialogId,50,1)`, opcode -32. Gói này khác gói chọn menu -30 và khác bán đồ hành trang 18. Cấu trúc, nguồn ID dialog và lượt thử chưa có xác nhận được ghi riêng trong [tài liệu bán đá quý Graham](E:/hso/TAI_LIEU_BAN_DA_QUY_GRAHAM.md).

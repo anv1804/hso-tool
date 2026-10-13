@@ -1323,22 +1323,73 @@ class HsoStudioApp:
             self.log_msg("Không gửi được lệnh bán: " + str(e))
 
     def open_graham_npc(self):
+        return self.open_npc_menu(-58, "Graham")
+
+    def open_mr_dylan_npc(self):
+        return self.open_npc_menu(-57, "Mr Dylan")
+
+    def open_npc_menu(self, npc_id, npc_name):
         if not self.state_data.get("in_game"):
-            self.log_msg("Chưa vào game: không thể gọi NPC Graham.")
-            return
+            self.log_msg(f"Chưa vào game: không thể gọi NPC {npc_name}.")
+            return False
         if self.state_data.get("remote_sell", {}).get("active"):
-            self.log_msg("Hãy chờ lượt bán đồ kết thúc trước khi gọi NPC Graham.")
-            return
+            self.log_msg(f"Hãy chờ lượt bán đồ kết thúc trước khi gọi NPC {npc_name}.")
+            return False
         if time.monotonic() < getattr(self, "pending_npc_until", 0.0):
-            return
+            return False
         try:
-            # The client displays the last known Graham menu immediately and requests
-            # fresh NPC data. Zero coordinates do not invoke virtual movement.
-            self.write_command({"action": "test_npc_packet", "npc_id": -58, "x": 0, "y": 0})
+            # Graham retains its existing local menu fallback. Other NPCs use the
+            # normal server menu request. Zero coordinates do not invoke movement.
+            self.write_command({"action": "test_npc_packet", "npc_id": npc_id, "x": 0, "y": 0})
             self.pending_npc_until = time.monotonic() + 1.0
-            self.log_msg("Đã gửi yêu cầu mở menu Graham trong game.")
+            self.log_msg(f"Đã gửi yêu cầu mở menu {npc_name} trong game.")
+            return True
         except OSError as e:
-            self.log_msg("Không gọi được NPC Graham: " + str(e))
+            self.log_msg(f"Không gọi được NPC {npc_name}: " + str(e))
+            return False
+
+    def open_npc_menu_modal(self):
+        old_dialog = getattr(self, "npc_menu_dialog", None)
+        if old_dialog is not None and old_dialog.winfo_exists():
+            old_dialog.lift()
+            return
+
+        dlg = tk.Toplevel(self.root)
+        self.npc_menu_dialog = dlg
+        dlg.title("Gọi menu NPC")
+        dlg.geometry("310x205")
+        dlg.resizable(False, False)
+        dlg.configure(bg=COLOR_BG_DARK)
+        dlg.transient(self.root)
+        dlg.grab_set()
+        x = self.root.winfo_x() + (self.root.winfo_width() - 310) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - 205) // 2
+        dlg.geometry(f"+{max(10, x)}+{max(10, y)}")
+
+        def close_dialog():
+            dlg.grab_release()
+            dlg.destroy()
+            self.npc_menu_dialog = None
+
+        def call_npc(callback):
+            if callback():
+                close_dialog()
+
+        panel = HsoPanel(dlg, title="GỌI MENU NPC")
+        panel.pack(fill="both", expand=True, padx=4, pady=4)
+        tk.Label(panel.body, text="Chọn NPC để mở menu trong game.",
+                 font=(FONT_FAMILY, 8), fg=COLOR_TEXT_MUTED,
+                 bg=COLOR_BG_DARK).pack(pady=(8, 6))
+        for label, callback in (
+                ("Graham (ID: -58)", self.open_graham_npc),
+                ("Mr Dylan (ID: -57)", self.open_mr_dylan_npc)):
+            HsoButton(panel.body, text=label, font_size=9, height=32,
+                      renderer=self.btn_renderer,
+                      command=lambda cb=callback: call_npc(cb)).pack(fill="x", padx=10, pady=4)
+        HsoButton(panel.body, text="Đóng", font_size=8, height=24,
+                  renderer=self.btn_renderer, command=close_dialog).pack(fill="x", padx=10, pady=(6, 4))
+        dlg.protocol("WM_DELETE_WINDOW", close_dialog)
+        dlg.bind("<Escape>", lambda event: close_dialog())
 
     # ==============================================================
     # ==============================================================
@@ -1526,15 +1577,15 @@ class HsoStudioApp:
         )
         self.btn_auto_sell.pack(side="left", fill="x", expand=True)
 
-        self.btn_npc_graham = HsoButton(
+        self.btn_npc_menu = HsoButton(
             c_func,
-            text="NPC Graham (Bán đá)",
+            text="Gọi menu NPC",
             font_size=7,
             height=23,
             renderer=self.btn_renderer,
-            command=self.open_graham_npc
+            command=self.open_npc_menu_modal
         )
-        self.btn_npc_graham.pack(fill="x", pady=(3, 0))
+        self.btn_npc_menu.pack(fill="x", pady=(3, 0))
 
     def redraw_player_bars(self):
         c = self.canvas_player_bars
@@ -1630,7 +1681,7 @@ class HsoStudioApp:
             for top, bottom, npc in getattr(self, "npc_rows", []):
                 if top <= y < bottom:
                     nx, ny = npc.get("x", 0), npc.get("y", 0)
-                    self.log_msg(f"📍 NPC: {npc.get('name')} tại ({nx}, {ny})")
+                    self.log_msg(f"📍 NPC: {npc.get('name')} | ID: {npc.get('id', '?')} tại ({nx}, {ny})")
                     return
 
     def pin_player(self, player_id, player_name=""):
@@ -3143,7 +3194,7 @@ class HsoStudioApp:
             c.configure(scrollregion=(0, 0, cw, 60))
             return
 
-        item_h = 22
+        item_h = 30
         pad_y = 2
         y_offset = 1
 
@@ -3153,7 +3204,7 @@ class HsoStudioApp:
         npcs_sorted = sorted(npcs, key=lambda n: math.hypot(n.get("x", 0) - mx, n.get("y", 0) - my))
 
         for npc in npcs_sorted:
-            n_id = npc.get("id", 0)
+            n_id = npc.get("id", "?")
             n_name = npc.get("name", "NPC")
             nx, ny = npc.get("x", 0), npc.get("y", 0)
             dist = int(math.hypot(nx - mx, ny - my))
@@ -3173,15 +3224,23 @@ class HsoStudioApp:
             if len(txt_name) > 13:
                 txt_name = txt_name[:13] + ".."
             c.create_text(
-                18, y_offset + item_h // 2,
+                18, y_offset + 10,
                 text=txt_name,
                 fill="#e8d5b5",
                 font=(FONT_FAMILY, 7, "bold"),
                 anchor="w"
             )
-            # Cự ly
+            # ID quét được từ client, giữ nguyên cả ID âm của NPC.
             c.create_text(
-                cw - 6, y_offset + item_h // 2,
+                18, y_offset + 23,
+                text=f"ID: {n_id}",
+                fill="#0abde3",
+                font=(FONT_FAMILY, 6),
+                anchor="w"
+            )
+            # Cự ly nằm cùng dòng ID, không chen vào tên NPC.
+            c.create_text(
+                cw - 6, y_offset + 23,
                 text=f"{dist}px",
                 fill="#8f8073",
                 font=(FONT_FAMILY, 6),
@@ -4375,23 +4434,25 @@ class HsoStudioApp:
 def show_graham_button():
     """Show the new control beside an already-running tool/game session."""
     root = tk.Tk()
-    root.title("NPC Graham — Bán đá quý")
+    root.title("Gọi menu NPC")
     root.geometry("270x125")
     root.resizable(False, False)
     root.configure(bg=COLOR_BG_DARK)
     root.attributes("-topmost", True)
     root.geometry(f"+{max(0, root.winfo_screenwidth() - 300)}+{max(0, root.winfo_screenheight() - 300)}")
     app = HsoStudioApp.__new__(HsoStudioApp)
+    app.root = root
     app.state_data = {}
     app.pending_npc_until = 0.0
-    message = tk.StringVar(value="Bấm nút để gọi menu Graham trong game.")
+    message = tk.StringVar(value="Bấm nút để chọn NPC cần gọi menu.")
     session_name = tk.StringVar(value="Đang đọc trạng thái game…")
     app.log_msg = message.set
     renderer = HsoButtonRenderer()
+    app.btn_renderer = renderer
     tk.Label(root, textvariable=session_name, font=(FONT_FAMILY, 7),
              fg=COLOR_TEXT_MUTED, bg=COLOR_BG_DARK).pack(fill="x", padx=8, pady=(5, 0))
-    button = HsoButton(root, text="NPC Graham (Bán đá)", font_size=9, height=30,
-                       renderer=renderer, command=app.open_graham_npc)
+    button = HsoButton(root, text="Gọi menu NPC", font_size=9, height=30,
+                       renderer=renderer, command=app.open_npc_menu_modal)
     button.pack(fill="x", padx=8, pady=(8, 5))
     tk.Label(root, textvariable=message, wraplength=250, justify="left",
              font=(FONT_FAMILY, 8), fg=COLOR_TEXT_GOLD, bg=COLOR_BG_DARK).pack(fill="x", padx=8)

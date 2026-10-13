@@ -4022,14 +4022,15 @@ extends AvMain {
 
     public void chat_npc(Message msg) {
         try {
-            byte by = msg.reader().readByte();
-            MainObject mainObject = MainObject.get_Object(by, (byte)2);
+            com.silverknight.NpcChatPayload chat = com.silverknight.NpcChatPayload.read(msg.reader());
+            com.silverknight.HsoBridge.logDebug("RECV chat_npc: id=" + chat.npcId + ", text='" + chat.text + "'");
+            MainObject mainObject = MainObject.get_Object(chat.npcId, (byte)2);
             if (mainObject != null && !mainObject.isRemove) {
-                mainObject.strChatPopup = msg.reader().readUTF();
+                mainObject.strChatPopup = chat.text;
             }
         }
         catch (Exception exception) {
-            // empty catch block
+            com.silverknight.HsoBridge.logDebug("RECV chat_npc malformed payload: " + exception);
         }
     }
 
@@ -4038,6 +4039,9 @@ extends AvMain {
             String string = msg.reader().readUTF();
             String string2 = msg.reader().readUTF();
             byte by = msg.reader().readByte();
+            com.silverknight.HsoBridge.logDebug("RECV InfoServer_Download: type=" + by
+                    + ", text='" + string.replace('\n', '|').replace('\r', ' ')
+                    + "', extra='" + string2 + "'");
             if (GameScreen.player != null && GameScreen.player.Action != 2 && GameScreen.player.Action != 4) {
                 GameScreen.player.resetAction();
                 GameScreen.player.posTransRoad = null;
@@ -4579,6 +4583,16 @@ extends AvMain {
             com.silverknight.HsoBridge.noteRemoteSellNotice(string);
             if (com.silverknight.HsoBridge.onRemoteSellDialog(this.idDialog, this.typeDialog, string)) {
                 return;
+            }
+            if (string != null) {
+                String strLower = string.toLowerCase();
+                if (strLower.indexOf("bạn có muốn bán") != -1 || strLower.indexOf("ban co muon ban") != -1
+                        || strLower.indexOf("bán với giá") != -1 || strLower.indexOf("ban voi gia") != -1) {
+                    com.silverknight.HsoBridge.logDebug("Auto-confirming sell dialog: id=" + this.idDialog);
+                    GlobalService.gI().dialog_Server(this.idDialog, this.typeDialog, (byte)1);
+                    GameCanvas.end_Dialog();
+                    return;
+                }
             }
             mVector mVector2 = new mVector("ReadMessenge vec4");
             mVector2.addElement(new iCommand("Ok", 2, 1, (AvMain)this));

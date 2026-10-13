@@ -30,3 +30,5 @@ KnightOnline_v403.jar.pending
 hso_remote_sell_probe.log
 patch_bin/
 npc_shop_cache/
+tools/diagnostics/*.class
+tools/diagnostics/*.jar

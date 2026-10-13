@@ -30,6 +30,7 @@ public final class HsoRemoteSellProbe implements Runnable, InvocationHandler {
     private final int saleCategory = 4;
     private final String expectedSampleName = "HP lớn";
     private final boolean merchantShopOnly = true;
+    private final boolean graham50VirtualOnly = true;
     private int saleId = -1; // Resolve the previously selected white ring from the live inventory.
     private int quantityBefore;
     private long coinBefore;
@@ -525,6 +526,52 @@ public final class HsoRemoteSellProbe implements Runnable, InvocationHandler {
         } else log("RESULT no Graham menu");
     }
 
+    private void virtualGraham50() throws Exception {
+        if(mapId!=19 || !"lronic".equals(field(player,"name")) || coins()!=216885L)
+            throw new IllegalStateException("The current one-Saphia trial context changed");
+        Object values=staticField(gameScreen,"Vecplayers");
+        int count=(Integer)invokeMethod(values.getClass().getMethod("size"),values);
+        Object bull=null;
+        for(int i=0;i<count;i++) {
+            Object value=invokeMethod(values.getClass().getMethod("elementAt",int.class),values,i);
+            if(value!=null && value.getClass().getName().equals("GameObjects.Monstervantieu")
+                    && "lronic".equals(field(value,"nameowner")) && number(value,"ID")==8299)bull=value;
+        }
+        if(bull==null || number(bull,"hp")<=0)throw new IllegalStateException("Expected purchased cargo's bull is unavailable");
+        int[][] points={{150,804},{156,792},{168,792},{144,792},{192,792},{144,768}};
+        int[] target=null;
+        for(int[] point:points)if(walkable(point[0],point[1])){target=point;break;}
+        if(target==null)throw new IllegalStateException("No valid current-map virtual endpoint near Graham's observed coordinates");
+        log("CASE type50_virtual_Graham: no purchase; map="+mapId+" local="+startX+","+startY+" endpoint="+target[0]+","+target[1]+" actor_id="+playerId+" bull=8299");
+        // Packet-only hypothesis: collision/pathfinding on the current client map
+        // cannot establish whether the server accepts Graham's coordinates.
+        // safe() still excludes boundaries and change-map gates at every step.
+        moveTo(target[0],target[1],24,60,false);
+        pause(2500);
+        log("VIRTUAL_ENDPOINT bull_client_position="+number(bull,"x")+","+number(bull,"y")+" last_server_self_echo="+echoX+","+echoY+" local="+number(player,"x")+","+number(player,"y"));
+        events.clear();requestedNpc=-58;
+        packet(23,new byte[]{(byte)-58},"Graham root at virtual endpoint");
+        pause(200);
+        packet(-30,new byte[]{(byte)0xFF,(byte)0xC6,0,1},"Graham sell gems menu0/index1 at virtual endpoint");
+        Event dialog=await(-32,300);
+        int id=playerId;
+        if(dialog!=null) {
+            if(dialog.dialogType!=50 || dialog.dialog!=playerId || !dialog.text.contains("20000 Vàng"))
+                throw new IllegalStateException("Unexpected server dialog; no sale confirmation");
+            id=dialog.dialog;
+        }
+        ByteArrayOutputStream bytes=new ByteArrayOutputStream();DataOutputStream out=new DataOutputStream(bytes);
+        out.writeShort(id);out.writeByte(50);out.writeByte(1);
+        packet(-32,bytes.toByteArray(),"one user-authorized type50 sale confirmation; fresh_dialog="+(dialog!=null));
+        boolean acknowledged=false;long until=System.currentTimeMillis()+8000;
+        while(System.currentTimeMillis()<until) {
+            guard();Event event=events.poll(40,TimeUnit.MILLISECONDS);
+            if(event!=null&&event.cmd==16)acknowledged=true;
+            if(acknowledged&&coins()==coinBefore+20000L){success=true;break;}
+        }
+        log("RESULT virtual_type50 credit_confirmed="+success+" inventory_ack="+acknowledged+" coin="+coinBefore+"->"+coins()+" bull_client_position="+number(bull,"x")+","+number(bull,"y"));
+    }
+
     private List<int[]> route(int sx,int sy,int tx,int ty) throws Exception {
         int cols=width/24,rows=height/24,total=cols*rows;
         int start=(sy/24)*cols+sx/24,target=(ty/24)*cols+tx/24;
@@ -598,6 +645,7 @@ public final class HsoRemoteSellProbe implements Runnable, InvocationHandler {
     @Override public void run() {
         try {
             initialize();
+            if(graham50VirtualOnly){virtualGraham50();return;}
             if(merchantShopOnly){openMerchantShop();return;}
             if (mapId == 1) throw new IllegalStateException("Cross-map diagnostic requires the distant farming map, not the village");
             if(trySale("one_unlocked_potion_direct"))return;
@@ -614,7 +662,7 @@ public final class HsoRemoteSellProbe implements Runnable, InvocationHandler {
                         int x=number(player,"x"),y=number(player,"y");
                         restoring=true;
                         if(active&&safe(x,y)){
-                            try{moveTo(x,y,12,40,true);}catch(Exception ex){
+                            try{moveTo(x,y,graham50VirtualOnly?24:12,graham50VirtualOnly?60:40,!graham50VirtualOnly);}catch(Exception ex){
                                 log("RESTORE direct endpoint: "+ex);move(x,y);
                             }
                         }

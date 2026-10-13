@@ -23,7 +23,7 @@ $RemoteSellSources = Get-ChildItem -LiteralPath (Join-Path $RemoteSellRoot 'src_
 & javac -encoding UTF-8 -source 8 -target 8 -cp microemulator-3.0.0.jar -d $RemoteSellClasses "@$RemoteSellSourcesFile"
 if ($LASTEXITCODE -ne 0) { throw 'Game compilation failed' }
 $RemoteSellClasspath = "$RemoteSellClasses;microemulator-3.0.0.jar"
-& javac -encoding UTF-8 -source 8 -target 8 -cp $RemoteSellClasspath -d $RemoteSellTests tools/tests/RemoteSellControllerTest.java tools/tests/RemoteSellPacketTest.java tools/tests/RemoteSellJsonTest.java tools/tests/GrahamNpcMenuTest.java
+& javac -encoding UTF-8 -source 8 -target 8 -cp $RemoteSellClasspath -d $RemoteSellTests tools/tests/RemoteSellControllerTest.java tools/tests/RemoteSellPacketTest.java tools/tests/RemoteSellJsonTest.java tools/tests/GrahamNpcMenuTest.java tools/tests/NpcChatPayloadTest.java
 if ($LASTEXITCODE -ne 0) { throw 'Test compilation failed' }
 & java -cp "$RemoteSellClasspath;$RemoteSellTests" RemoteSellControllerTest
 if ($LASTEXITCODE -ne 0) { throw 'Controller tests failed' }
@@ -33,6 +33,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Packet tests failed' }
 if ($LASTEXITCODE -ne 0) { throw 'JSON tests failed' }
 & java '-Djava.awt.headless=true' -cp "$RemoteSellClasspath;$RemoteSellTests" GrahamNpcMenuTest
 if ($LASTEXITCODE -ne 0) { throw 'Graham menu tests failed' }
+& java -cp "$RemoteSellClasspath;$RemoteSellTests" NpcChatPayloadTest
+if ($LASTEXITCODE -ne 0) { throw 'NPC chat payload tests failed' }
 & python -m unittest discover -s tools/tests -p 'test_*.py' -v
 if ($LASTEXITCODE -ne 0) { throw 'Tool tests failed' }
 Write-Host 'Remote sell validation passed. No game account or live server was contacted.'

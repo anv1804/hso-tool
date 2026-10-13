@@ -60,6 +60,9 @@ public class HsoBridge {
     public static boolean sellTier0Only = true;
     public static boolean sellUnlockedOnly = true;
     public static volatile boolean isAutoOpeningShop = false;
+    public static volatile boolean isSelling = false;
+    public static volatile int vibeSoldItems = 0;
+    public static volatile int vibeTotalItems = 0;
     private static long lastAutoSellCheckTime = 0L;
     private static volatile long remoteSellInventoryRevision = 0L;
     private static final RemoteSellController remoteSell = new RemoteSellController(new RemoteSellController.Transport() {
@@ -194,7 +197,7 @@ public class HsoBridge {
 
         checkCommand();
         remoteSell.tick(now);
-        isAutoOpeningShop = remoteSell.isActive();
+        isAutoOpeningShop = remoteSell.isActive() || isSelling;
         ensureMonsterScanContext();
         if (!isRemoteSellBusy()) {
             advanceMonsterScan(now);
@@ -1387,42 +1390,177 @@ public class HsoBridge {
         return sellSingleItem(id, category, false);
     }
 
-    public static boolean sellSingleItem(short id, int category, boolean allowLocked) {
+    public static synchronized boolean sellSingleItem(final short id, final int category, final boolean allowLocked) {
+        if (Item.VecInvetoryPlayer == null) return false;
         Item item = findInventoryItem(id, category);
         if (item == null || item.setNameNull() || (category != 3 && category != 7)) {
-            remoteSell.reject("item_not_found", "Không tìm thấy vật phẩm cần bán trong hành trang.");
+            logDebug("sellSingleItem: Không tìm thấy vật phẩm id=" + id + " cat=" + category);
             return false;
         }
         if (isLockedItem(item) && !allowLocked) {
-            remoteSell.reject("locked_item", "Vật phẩm có khóa: cần xác nhận bán trên bảng hành trang.");
+            logDebug("sellSingleItem: Vật phẩm có khóa, cần cho phép bán đồ khóa.");
             return false;
         }
-        return startRemoteSale(new RemoteSellController.Target[] {saleTarget(item, true, allowLocked)});
+
+        final Item itemToSell = item;
+        new Thread(new Runnable() {
+            public void run() {
+                int startX = GameScreen.player != null ? GameScreen.player.x : 0;
+                int startY = GameScreen.player != null ? GameScreen.player.y : 0;
+                int npcId = -3;
+                int npcX = 756;
+                int npcY = 120;
+                String npcName = "Lisa (Từ xa)";
+                isSelling = true;
+                isAutoOpeningShop = true;
+                vibeSoldItems = 0;
+                vibeTotalItems = 1;
+                try {
+                    String name = itemToSell.itemName != null ? itemToSell.itemName : ("id=" + id);
+                    logDebug("Bán từng cái (Vị trí ảo): Di chuyển ảo tới " + npcName + " (id=" + npcId + ") tại (" + npcX + "," + npcY + ")...");
+                    spoofMoveTo(npcX, npcY);
+                    logDebug("Bán từng cái: Gửi getlist_from_npc id=" + npcId);
+                    GlobalService.gI().getlist_from_npc((byte)npcId);
+                    try { Thread.sleep(300L); } catch (InterruptedException ignored) {}
+
+                    logDebug("Bán từng cái: Đang gửi lệnh bán '" + name + "' (id=" + id + ", cat=" + category + ")...");
+                    GlobalService.gI().delete_Item((byte)category, id, (byte)1);
+
+                    // Đợi server xác nhận xóa item khỏi hành trang (tối đa 2500ms)
+                    long startWait = System.currentTimeMillis();
+                    boolean removed = false;
+                    while (System.currentTimeMillis() - startWait < 2500L) {
+                        try { Thread.sleep(80L); } catch (InterruptedException ignored) {}
+                        if (!hasItemInInventory(id, category)) {
+                            removed = true;
+                            break;
+                        }
+                    }
+
+                    if (removed) {
+                        vibeSoldItems = 1;
+                        logDebug("Bán từng cái: Đã bán thành công '" + name + "'.");
+                    } else {
+                        logDebug("Bán từng cái: Server chưa phản hồi xóa '" + name + "' sau 2.5s.");
+                    }
+                } catch (Exception e) {
+                    logDebug("Lỗi sellSingleItem: " + e.getMessage());
+                } finally {
+                    isSelling = false;
+                    isAutoOpeningShop = false;
+                    restoreVirtualMove(startX, startY);
+                    try {
+                        Main.GameCanvas.end_Dialog();
+                        if (Main.GameCanvas.menu2 != null) Main.GameCanvas.menu2.doCloseMenu();
+                    } catch (Exception ignored) {}
+                    logDebug("Bán từng cái (Vị trí ảo): Đã hoàn trả tọa độ về (" + startX + "," + startY + ").");
+                }
+            }
+        }, "HsoVibeSellSingle").start();
+        return true;
     }
 
     public static void sellMatchingItems() {
         sellMatchingItems(false);
     }
 
-    private static void sellMatchingItems(boolean automatic) {
-        java.util.ArrayList<RemoteSellController.Target> targets = new java.util.ArrayList<RemoteSellController.Target>();
-        if (Item.VecInvetoryPlayer != null) {
-            for (int i = 0; i < Item.VecInvetoryPlayer.size(); ++i) {
-                Object value = Item.VecInvetoryPlayer.elementAt(i);
-                if (value instanceof Item && shouldSellItem((Item)value)) {
-                    Item item = (Item)value;
-                    targets.add(saleTarget(item, false, !sellUnlockedOnly));
-                }
-            }
-        }
-        if (targets.isEmpty()) {
-            if (!automatic) remoteSell.reject("no_matching_items", "Không có vật phẩm thỏa bộ lọc bán đồ.");
+    private static synchronized void sellMatchingItems(final boolean automatic) {
+        if (isSelling) {
+            logDebug("Auto Sell: Đang có tiến trình bán chạy ngầm, bỏ qua đợt mới.");
             return;
         }
-        startRemoteSale(targets.toArray(new RemoteSellController.Target[targets.size()]));
+        if (Item.VecInvetoryPlayer == null || Item.VecInvetoryPlayer.size() == 0) {
+            logDebug("Auto Sell: Hành trang trống.");
+            return;
+        }
+
+        isSelling = true;
+        new Thread(new Runnable() {
+            public void run() {
+                int totalSold = 0;
+                int startX = GameScreen.player != null ? GameScreen.player.x : 0;
+                int startY = GameScreen.player != null ? GameScreen.player.y : 0;
+                int npcId = -3;
+                int npcX = 756;
+                int npcY = 120;
+                String npcName = "Lisa (Từ xa)";
+                isAutoOpeningShop = true;
+                vibeSoldItems = 0;
+                vibeTotalItems = 0;
+                try {
+                    logDebug("Auto Sell (bán từng cái vị trí ảo): Bắt đầu quét và bán tuần tự...");
+                    logDebug("Auto Sell: Di chuyển ảo tới " + npcName + " (id=" + npcId + ") tại (" + npcX + "," + npcY + ")...");
+                    spoofMoveTo(npcX, npcY);
+                    logDebug("Auto Sell: Gửi getlist_from_npc id=" + npcId);
+                    GlobalService.gI().getlist_from_npc((byte)npcId);
+                    try { Thread.sleep(300L); } catch (InterruptedException ignored) {}
+
+                    while (true) {
+                        // Mỗi lượt quét tìm 1 món đầu tiên thỏa điều kiện bán
+                        Item target = null;
+                        if (Item.VecInvetoryPlayer != null) {
+                            for (int i = 0; i < Item.VecInvetoryPlayer.size(); ++i) {
+                                Object obj = Item.VecInvetoryPlayer.elementAt(i);
+                                if (obj instanceof Item) {
+                                    Item it = (Item)obj;
+                                    if (shouldSellItem(it)) {
+                                        target = it;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (target == null) {
+                            logDebug("Auto Sell: Không còn món nào thỏa điều kiện bán.");
+                            break;
+                        }
+
+                        final short targetId = (short)target.Id;
+                        final byte targetCat = (byte)target.ItemCatagory;
+                        final String targetName = target.itemName != null ? target.itemName : ("Item#" + targetId);
+
+                        logDebug("Auto Sell: Đang gửi lệnh bán lẻ '" + targetName + "' (id=" + targetId + ", cat=" + targetCat + ")...");
+                        GlobalService.gI().delete_Item(targetCat, targetId, (byte)1);
+
+                        // Chờ server xác nhận xóa item khỏi hành trang (tối đa 2500ms, kiểm tra mỗi 80ms)
+                        long startWait = System.currentTimeMillis();
+                        boolean removed = false;
+                        while (System.currentTimeMillis() - startWait < 2500L) {
+                            try { Thread.sleep(80L); } catch (InterruptedException ignored) {}
+                            if (!hasItemInInventory(targetId, (int)targetCat)) {
+                                removed = true;
+                                break;
+                            }
+                        }
+
+                        if (removed) {
+                            totalSold++;
+                            vibeSoldItems = totalSold;
+                            logDebug("Auto Sell: Đã bán xong '" + targetName + "' (Tổng: " + totalSold + "). Nghỉ 150ms...");
+                            try { Thread.sleep(150L); } catch (InterruptedException ignored) {}
+                        } else {
+                            logDebug("Auto Sell: Quá thời gian chờ server xác nhận bán '" + targetName + "', dừng chuỗi bán để an toàn.");
+                            break;
+                        }
+                    }
+                } catch (Exception e) {
+                    logDebug("Lỗi Auto Sell: " + e.getMessage());
+                } finally {
+                    isSelling = false;
+                    isAutoOpeningShop = false;
+                    restoreVirtualMove(startX, startY);
+                    try {
+                        Main.GameCanvas.end_Dialog();
+                        if (Main.GameCanvas.menu2 != null) Main.GameCanvas.menu2.doCloseMenu();
+                    } catch (Exception ignored) {}
+                    logDebug("Auto Sell: Hoàn tất đợt bán. Tổng số món đã bán: " + totalSold + ". Đã trả tọa độ về (" + startX + "," + startY + ").");
+                }
+            }
+        }, "HsoVibeSellMatching").start();
     }
 
-    public static boolean isRemoteSellBusy() { return remoteSell.isActive(); }
+    public static boolean isRemoteSellBusy() { return remoteSell.isActive() || isSelling; }
     public static boolean isRemoteSellPositionGuarded() {
         return remoteSell.guardPosition(System.currentTimeMillis());
     }
@@ -1451,6 +1589,9 @@ public class HsoBridge {
     public static void noteRemoteSellNotice(String text) { remoteSell.onNotice(text); }
 
     private static String remoteSellJson() {
+        if (isSelling) {
+            return "{\"active\":true,\"phase\":\"vibe_selling\",\"message\":\"Đang bán trang bị rác từ xa...\",\"error\":\"\",\"sold_items\":" + vibeSoldItems + ",\"sold_units\":" + vibeSoldItems + ",\"total_items\":" + vibeTotalItems + "}";
+        }
         synchronized (remoteSell) {
             return "{\"active\":" + remoteSell.isActive()
                     + ",\"phase\":\"" + escape(remoteSell.phase())
