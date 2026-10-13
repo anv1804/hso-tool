@@ -847,49 +847,25 @@ public class HsoBridge {
         int[] targets = getLiveFarmTargets(player, now);
         if (targets == null || targets.length == 0) return;
 
-        player.IDAttack = targets[0];
+        // Triệt tiêu hoàn toàn việc chọn/khóa mục tiêu riêng vào 1 con quái
+        // Giúp nhân vật không quay mặt hay tung animation vào riêng 1 con nào trước
+        player.IDAttack = -1;
+        player.KillFire = -1;
+        GameScreen.ObjFocus = null;
 
-        // 1. Dồn gom toàn bộ quái trên map vào 1 danh sách để tấn công 1 hit cả map
-        mVector allTargets = new mVector("Auto Farm All Map Targets");
+        // DOUBLE HIT ĐỒNG BỘ 100% CHO TOÀN BỘ QUÁI TRONG DANH SÁCH:
+        // Tuyệt đối không gửi gói gộp allTargets (vì server HSO chỉ trừ máu con đầu tiên gây double hit cục bộ).
+        // Thay vào đó: Mọi con quái trong danh sách đều nhận chính xác 2 hit (Double Hit) đồng loạt!
+        // Vòng 1: Gửi Hit 1 cho toàn bộ quái trong danh sách
         for (int i = 0; i < targets.length; ++i) {
-            allTargets.addElement(new Object_Effect_Skill((short)targets[i], (byte)1));
+            mVector single = new mVector("Auto Farm Target H1");
+            single.addElement(new Object_Effect_Skill((short)targets[i], (byte)1));
+            GlobalService.gI().fire_monster(single, (byte)0);
         }
 
-        // 2. Tìm chiêu tấn công sẵn sàng trên thanh phím tắt (nếu có chiêu đánh lan)
-        int readySkillId = -1;
-        int hotkeyIdx = -1;
-        if (player.mhotkey != null && Player.levelTab < player.mhotkey.length) {
-            HotKey[] keys = player.mhotkey[Player.levelTab];
-            if (keys != null) {
-                for (int k = 0; k < keys.length; ++k) {
-                    if (keys[k] != null && keys[k].type == HotKey.SKILL) {
-                        int sid = keys[k].id;
-                        Skill s = MainListSkill.getSkillFormId(sid);
-                        if (s != null && s.typeSkill == 0 && player.setDelaySkill(sid, -1)) {
-                            readySkillId = sid;
-                            hotkeyIdx = k;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        // 3. Phóng gói tin 1 hit chứa toàn bộ quái trên map (nếu có chiêu lan)
-        if (readySkillId >= 0) {
-            GlobalService.gI().fire_monster(allTargets, (byte)readySkillId);
-            player.setAddDelaySkill(readySkillId, hotkeyIdx);
-        } else {
-            GlobalService.gI().fire_monster(allTargets, (byte)0);
-        }
-
-        // 4. ĐỒNG THỜI GỬI KÈM GÓI ĐÁNH CHO TỪNG QUÁI TRONG CÙNG 1 TICK (BURST 1 HIT)
-        // Cơ chế gốc học từ Git: Chiêu 0 (đánh thường) trên server HSO chỉ xử lý đơn mục tiêu.
-        // Khi gom nhiều quái vào 1 gói tin skill 0, server chỉ trừ máu quái đầu tiên và bỏ qua quái sau.
-        // Vòng lặp bắn toàn bộ N gói tin single trong < 1ms giúp TCP socket đẩy toàn bộ gói trong cùng 1 frame,
-        // server xử lý và trừ máu TOÀN BỘ quái cùng lúc, tiêu diệt 100% quái trong 1 hit duy nhất!
+        // Vòng 2: Gửi Hit 2 (Double Hit) cho toàn bộ quái trong danh sách
         for (int i = 0; i < targets.length; ++i) {
-            mVector single = new mVector("Auto Farm Single Target");
+            mVector single = new mVector("Auto Farm Target H2");
             single.addElement(new Object_Effect_Skill((short)targets[i], (byte)1));
             GlobalService.gI().fire_monster(single, (byte)0);
         }
@@ -902,17 +878,61 @@ public class HsoBridge {
         if (idsToCheck == null || idsToCheck.length == 0) return new int[0];
 
         int aliveCount = 0;
+        int deadCount = 0;
+        long latestDeadRespawnDue = 0L;
+        boolean hasDamagedAlive = false; // Có quái sống đang bị thương (đang đánh dở)
+
         for (int i = 0; i < idsToCheck.length; ++i) {
-            if (isMonsterAlive(idsToCheck[i])) {
+            int mid = idsToCheck[i];
+            if (isMonsterAlive(mid)) {
                 ++aliveCount;
+                MonsterRecord rec = findMonsterRecord(mid);
+                if (rec != null && rec.maxHp > 0 && rec.hp < rec.maxHp) {
+                    hasDamagedAlive = true;
+                }
+            } else {
+                ++deadCount;
+                MonsterRecord rec = findMonsterRecord(mid);
+                if (rec != null && rec.deathTime > 0L) {
+                    long interval = rec.respawnIntervalMs > 0 ? rec.respawnIntervalMs : 5000L;
+                    if (interval <= 60000L) {
+                        long due = rec.deathTime + interval;
+                        if (due > latestDeadRespawnDue) {
+                            latestDeadRespawnDue = due;
+                        }
+                    }
+                }
             }
         }
 
-        // TÌNH HUỐNG 1: CÓ QUÁI ĐANG SỐNG (kể cả 1 con hay toàn map)
-        // -> LẬP TỨC ĐÁNH NGAY TOÀN BỘ CÁC CON ĐANG SỐNG!
-        // Quái cần 2-3 hit mới chết sẽ được dồn đòn liên tục theo đúng nhịp hồi chiêu đánh thường (mỗi 250ms),
-        // tuyệt đối KHÔNG ĐƯỢC nhịn đánh hay chờ đợi bất kỳ con quái nào đã chết!
-        if (aliveCount > 0) {
+        // TÌNH HUỐNG 1: 100% QUÁI ĐỀU ĐANG SỐNG (aliveCount == idsToCheck.length)
+        // -> Trạng thái đồng bộ hoàn hảo: Tấn công toàn bộ 100% quái!
+        if (aliveCount == idsToCheck.length) {
+            return idsToCheck;
+        }
+
+        // TÌNH HUỐNG 2: 100% QUÁI ĐỀU ĐÃ CHẾT (aliveCount == 0)
+        // -> Chờ đến khi con chết MUỘN NHẤT chạm ngưỡng đón đầu 500ms
+        if (aliveCount == 0) {
+            long threshold = latestDeadRespawnDue > 0L ? latestDeadRespawnDue : (now + 5000L);
+            if (now >= threshold - PREEMPTIVE_LEAD_MS) {
+                // Đã chạm mốc đón đầu: trả về toàn bộ quái để tung đòn đón đầu đồng loạt!
+                return idsToCheck;
+            }
+            return new int[0]; // Chưa tới giờ -> Đợi (Hold Fire)
+        }
+
+        // TÌNH HUỐNG 3: ĐÀN QUÁI ĐANG BỊ LỆCH PHA (Vừa có quái sống, vừa có quái chết)
+        // A. Nếu con chết muộn nhất cũng sắp hồi sinh (trong vòng 500ms nữa):
+        //    -> Gom toàn bộ (cả quái sống lẫn quái sắp hồi sinh) vào đúng 1 nhịp đánh!
+        if (latestDeadRespawnDue > 0L && now >= latestDeadRespawnDue - PREEMPTIVE_LEAD_MS) {
+            return idsToCheck;
+        }
+
+        // B. Nếu có các quái sống ĐANG BỊ THƯƠNG (đang đánh dở từ đợt trước):
+        //    -> Đánh tiếp các con sống đang bị thương này để tiêu diệt dứt điểm,
+        //       đưa toàn bộ đàn về trạng thái CHẾT để chờ hội tụ chung 1 mốc hồi sinh!
+        if (hasDamagedAlive) {
             int[] liveIds = new int[aliveCount];
             int idx = 0;
             for (int i = 0; i < idsToCheck.length; ++i) {
@@ -923,27 +943,9 @@ public class HsoBridge {
             return liveIds;
         }
 
-        // TÌNH HUỐNG 2: TOÀN BỘ QUÁI ĐỀU ĐÃ CHẾT (aliveCount == 0)
-        // -> Chờ đón đầu thời điểm quái hồi sinh sớm 500ms
-        long earliestRespawnDueTime = 0L;
-        for (int i = 0; i < idsToCheck.length; ++i) {
-            MonsterRecord rec = findMonsterRecord(idsToCheck[i]);
-            if (rec != null && rec.deathTime > 0L) {
-                long interval = rec.respawnIntervalMs > 0 ? rec.respawnIntervalMs : 5000L;
-                // Bỏ qua các boss / quái đặc biệt có thời gian hồi sinh cực dài (> 60s)
-                if (interval > 60000L) continue;
-                long due = rec.deathTime + interval;
-                if (earliestRespawnDueTime == 0L || due < earliestRespawnDueTime) {
-                    earliestRespawnDueTime = due;
-                }
-            }
-        }
-
-        long threshold = earliestRespawnDueTime > 0L ? earliestRespawnDueTime : (now + 5000L);
-        if (now >= threshold - PREEMPTIVE_LEAD_MS) {
-            return idsToCheck;
-        }
-
+        // C. Ngược lại: Các quái sống đều full máu (mới hồi sinh sớm) trong khi các quái khác vẫn đang chết:
+        //    -> BẮT BUỘC HOLD FIRE (GIỮ NHỊP)! Tuyệt đối KHÔNG đánh lẻ tẻ quái vừa hồi sinh sớm,
+        //       chờ cho các con chết còn lại hồi sinh đầy đủ (chạm mốc đón đầu) thì gom đánh chung 1 thể!
         return new int[0];
     }
 

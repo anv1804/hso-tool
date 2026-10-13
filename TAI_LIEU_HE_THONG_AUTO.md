@@ -87,33 +87,41 @@ Hệ thống bao gồm 2 thành phần chính hoạt động song song và đồ
 
 ## 4. CƠ CHẾ AUTO FARM 1-HIT TOÀN MAP (FULL MAP FARM BURST)
 
-### 4.1. Đặc tính giao thức Server HSO với Chiêu 0 (Đánh thường)
+### 4.1. Đặc tính giao thức Server HSO & Cơ chế Double Hit Đồng Bộ 100%
 - Gói tin tấn công `fire_monster(mVector targets, byte typekill)` gửi opcode 9 lên server.
-- **Nguyên lý của server**: Khi sử dụng Chiêu 0 (đánh thường), mã nguồn server HSO chỉ xử lý sát thương cho quái đầu tiên trong danh sách `targets`, toàn bộ quái phía sau bị server bỏ qua nếu chỉ gửi 1 gói gộp.
-- **Giải pháp Burst Loop**:
-  1. Gửi 1 gói tin gộp `fire_monster(allTargets, (byte)0)` (hoặc kèm skill diện rộng nếu có).
-  2. Ngay trong cùng tích tắc (vòng lặp Java < 1ms), duyệt toàn bộ danh sách quái và gửi liên tiếp các gói đơn lẻ `fire_monster(singleTarget, (byte)0)`.
-  3. Toàn bộ gói tin được gom chung vào cùng một frame socket TCP. Server tiếp nhận và áp dụng sát thương lên **100% quái trong map tại đúng 1 thời điểm duy nhất**.
+- **Nguyên nhân gây mất đồng bộ trước đây**:
+  - Khi gửi gói gộp `fire_monster(allTargets, (byte)0)` kèm theo gói lẻ: Server với Skill 0 chỉ trừ máu con đầu tiên, khiến con đầu tiên bị ăn **Double Hit** (2 đòn) trong khi các con còn lại chỉ ăn 1 đòn. Con đầu tiên chết trước, kéo theo chu kỳ lệch pha dây chuyền.
+  - Đồng thời việc gán `player.IDAttack = targets[0]` khiến client khóa mục tiêu vào 1 con, tạo cảm giác nhân vật nhắm đánh 1 con trước rồi mới đánh cả map.
+- **Giải pháp Double Hit Đồng Bộ Hoàn Hảo**:
+  - Hủy bỏ việc khóa mục tiêu (`player.IDAttack = -1`, `player.KillFire = -1`, `GameScreen.ObjFocus = null`).
+  - Loại bỏ hoàn toàn gói gộp thừa.
+  - Áp dụng 2 vòng lặp gửi đòn đánh:
+    - Vòng 1: Gửi Hit 1 cho 100% quái trong danh sách.
+    - Vòng 2: Gửi Hit 2 (Double Hit) cho 100% quái trong danh sách.
+  - **100% quái nhận chính xác 2 hit như nhau**, máu cùng tụt 2 nhịp đồng loạt, sát thương nhân đôi và không con nào bị lệch.
 
-### 4.2. Tối ưu nhịp đánh chuẩn 1.0 giây (Quái cần 2-3 hit)
+### 4.2. Tối ưu nhịp đánh chuẩn 1.0 giây (Quái cần 2-3 đợt đánh)
 - Chiêu đánh thường cơ bản của tất cả các phái có **thời gian hồi gốc là 1s (1000ms)**.
-- Khi đánh quái cấp cao hoặc máu lớn cần 2-3 hit mới chết:
+- Khi đánh quái cấp cao hoặc máu lớn cần 2 đợt (4 hit) mới chết:
   - Hàm `getNormalAttackCooldownMs()` đọc thời gian hồi thực tế từ `skill.mLvSkill[lv].getdelay()`.
   - Tự động trừ bù **50ms độ trễ mạng** (`latency ~ 950ms`).
-  - Đòn đánh kế tiếp (Hit 2, Hit 3) được phóng đi chính xác tại thời điểm chiêu vừa hồi, server chấp nhận 100% đòn đánh mà không bị trễ hay nghẽn nhịp.
+  - Đợt đánh kế tiếp (Hit 3, Hit 4) được phóng đi chính xác tại thời điểm chiêu vừa hồi, server chấp nhận 100% đòn đánh mà không bị trễ hay nghẽn nhịp.
 
 ### 4.3. Cơ chế đón đầu hồi sinh sớm 500ms (Preemptive Strike)
 - Khi **toàn bộ quái được chọn đã chết** (`aliveCount == 0`):
-  - Hệ thống tính toán thời điểm con quái hồi sinh sớm nhất (`minRespawnTime`).
-  - Khi đồng hồ đếm ngược còn **500ms** (`now >= minRespawnTime - 500L`):
+  - Hệ thống tính toán thời điểm con quái chết **MUỘN NHẤT** hồi sinh (`latestDeadRespawnDue`).
+  - Khi đồng hồ đếm ngược còn **500ms** (`now >= latestDeadRespawnDue - 500L`):
   - Phóng gói tin tấn công đón đầu lên server.
   - Khi quái vừa thành hình trên server thì sát thương đã có sẵn tại mili-giây 0, quái chết ngay lập tức mà không kịp xuất hiện trên màn hình hay phát hoạt ảnh.
 
-### 4.4. Thuật toán Đồng bộ Pha (Convergence Sync / Hold Fire)
+### 4.4. Thuật toán Đồng bộ Pha Hội tụ (Phase Sync Convergence / Hold Fire)
 - Khi trong map có sự lệch pha (một số quái sống và một số quái đang đếm ngược hồi sinh):
-  - Hệ thống áp dụng cơ chế **Hold Fire (Giữ nhịp)**: Chờ các quái chết sắp hồi sinh cùng nhóm.
-  - Khi nhóm quái chết chạm ngưỡng đón đầu, gom toàn bộ quái sống và quái mới hồi sinh vào **đúng 1 nhịp đánh duy nhất**.
-  - Toàn bộ đàn quái được gán chung 1 mốc chết (`deathTime`), đưa chu kỳ của toàn map về trạng thái đồng bộ 100% cho các đợt tiếp theo.
+  1. **Nếu có quái sống đang bị thương dở dang** (`hp < maxHp`): Hệ thống đánh tiếp các con đang bị thương để dứt điểm chúng, đưa toàn bộ đàn về trạng thái CHẾT.
+  2. **Nếu các quái sống đều full máu (mới hồi sinh sớm)** trong khi các quái khác vẫn đang đếm ngược hồi sinh:
+     - Hệ thống kích hoạt trạng thái **HOLD FIRE (Giữ nhịp)**: Tuyệt đối không đánh lẻ tẻ con vừa hồi sinh sớm.
+     - Chờ cho đến khi con chết muộn nhất chạm mốc đón đầu 500ms.
+     - Lúc này 100% đàn quái đều có mặt (hoặc vừa đón đầu hồi sinh), hệ thống tung đòn gom toàn bộ quái trong map vào **đúng 1 nhịp đánh duy nhất**.
+  3. Kể từ thời điểm đó, **toàn bộ đàn quái hội tụ về chung 1 giây hồi sinh và 1 giây chết**, duy trì trạng thái đồng bộ vĩnh viễn!
 
 ### 4.5. Quản lý cấu hình Farm theo từng Map
 - Cấu hình farm được lưu trữ theo hồ sơ từng bản đồ (`map_id`).

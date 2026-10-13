@@ -4,7 +4,7 @@ Bộ công cụ hỗ trợ chơi game, Radar thời gian thực, Auto Farm toàn
 
 ---
 
-## 📌 Tính Năng Nổi Bật (Phiên Bản v1.0)
+## 📌 Tính Năng Nổi Bật (Phiên Bản v1.1)
 
 - 📡 **Radar Bản Đồ & Quét Quái Toàn Map**:
   - Quét nhận diện toàn bộ quái trên map chỉ trong 1.5 - 2 giây.

@@ -1,5 +1,5 @@
 # CHECKPOINT DỰ ÁN HSO TOOL & KNIGHT ONLINE v403
-*Phiên bản: v1.0 | Ngày cập nhật: 13/10/2026*
+*Phiên bản: v1.1 | Ngày cập nhật: 13/10/2026*
 
 ---
 
@@ -205,5 +205,20 @@
 - `hso_tool.py`: Ứng dụng điều khiển HSO Tool Studio GUI (Tkinter, Controls tinh giản, icon Auto Fam ⚙, đếm ngược Đồ Sát 180s, Radar nhỏ gọn, Monster Grid 2 cột).
 - `build_jar.sh`: Script 1-click biên dịch và re-pack `KnightOnline_v403.jar`.
 - `KnightOnline_v403.jar`: File JAR game đã tích hợp mod mới nhất.
+
+---
+
+## 7. Cập nhật Phiên bản v1.1: Double Hit Đồng Bộ 100% & Khắc phục Lệch Pha Quái (13/10/2026)
+1. **Khắc phục triệt để lỗi quái đầu tiên bị đánh trước & Double Hit cục bộ**:
+   - *Nguyên nhân*: Gói gộp `allTargets` gửi trước vòng lặp chỉ trừ máu con đầu tiên trên server với Skill 0, sau đó vòng lặp lại gửi tiếp 1 hit -> con đầu tiên bị ăn 2 hit (Double Hit), các con khác chỉ ăn 1 hit. Đồng thời `player.IDAttack = targets[0]` khiến client khóa mục tiêu quay sang con đó trước.
+   - *Giải pháp*: Xóa bỏ hoàn toàn gói gộp thừa; hủy khóa mục tiêu (`player.IDAttack = -1`, `player.KillFire = -1`, `ObjFocus = null`).
+2. **Double Hit Đồng Bộ 100% cho toàn bộ quái trong danh sách**:
+   - Sử dụng 2 vòng lặp liên tiếp trong cùng 1 tick mạng: Vòng 1 gửi Hit 1 cho 100% quái, Vòng 2 gửi Hit 2 cho 100% quái.
+   - 100% quái nhận chính xác 2 hit như nhau, sát thương nhân đôi, máu cùng tụt 2 nhịp đồng loạt và không con nào bị lệch.
+3. **Thuật toán Đồng bộ Pha Hội tụ (Phase Sync Convergence / Hold Fire)**:
+   - Với các quái đang đánh dở (`hp < maxHp`): Đánh tiếp Double Hit để dứt điểm chúng hoàn toàn.
+   - Khi có quái hồi sinh sớm full máu trong khi các quái khác vẫn đang đếm ngược: Hệ thống **HOLD FIRE (Giữ nhịp)**, đợi cho đến khi con chết muộn nhất (`latestDeadRespawnDue`) chạm mốc đón đầu 500ms thì mới tung đòn gom cả đàn.
+   - Toàn bộ đàn quái hội tụ về chung 1 giây hồi sinh và 1 giây chết, duy trì trạng thái đồng bộ vĩnh viễn!
+
 
 
