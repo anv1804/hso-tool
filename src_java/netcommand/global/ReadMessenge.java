@@ -488,6 +488,7 @@ extends AvMain {
                     if (mainObject == null) {
                         if (by == 1) {
                             MainMonster.createMonster(s2, s3, s4, s);
+                            com.silverknight.HsoBridge.onMonsterRespawned(s2, s3, s4);
                             GlobalService.gI().monster_info(s2);
                             continue;
                         }
@@ -536,6 +537,7 @@ extends AvMain {
                         mainObject.toX = s3;
                         mainObject.toY = s4;
                         mainObject.isMove = true;
+                        com.silverknight.HsoBridge.updateMonsterPosition(s2, s3, s4);
                         if (by2 == 126) {
                             if (mainObject.StepMovebocap != 1) {
                                 GameScreen.addEffectEndKill(54, mainObject.x, mainObject.y - 20);
@@ -900,7 +902,7 @@ extends AvMain {
             int n4 = msg.reader().readInt();
             byte by = msg.reader().readByte();
             int n5 = msg.reader().readInt();
-            com.silverknight.HsoBridge.rememberMonsterInfo(s2, n2, s3, s4, n3, n4);
+            com.silverknight.HsoBridge.rememberMonsterInfo(s2, n2, s3, s4, n3, n4, n5);
             MainMonster mainMonster = (MainMonster)MainObject.get_Object(s2, (byte)1);
             if (mainMonster == null || mainMonster.isRemove) {
                 return;

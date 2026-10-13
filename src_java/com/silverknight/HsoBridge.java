@@ -35,6 +35,17 @@ public class HsoBridge {
     private static final String CMD_DIR = "client_commands";
 
     public static boolean isAutoPickup = false;
+    public static boolean lootWhite = true;
+    public static boolean lootBlue = true;
+    public static boolean lootYellow = true;
+    public static boolean lootPurple = true;
+    public static boolean lootOrange = true;
+    public static boolean lootGreen = true;
+    public static boolean lootHp = true;
+    public static boolean lootMp = true;
+    public static boolean lootGold = true;
+    public static boolean lootMaterial = true;
+    public static boolean lootQuest = true;
     public static boolean isAutoAttack = false;
     public static boolean pendingMinArea = false;
     public static boolean isSilentRequestArea = false;
@@ -65,6 +76,8 @@ public class HsoBridge {
     private static int monsterScanNextId = -1;
     private static boolean monsterScanDone = false;
     private static long lastMonsterScanRequest = 0;
+    private static int monsterRefreshIndex = 0;
+    private static long lastMonsterRefreshTime = 0;
     private static final mVector mapMonsterRecords = new mVector("Auto Fam map monsters");
 
     private static class MonsterRecord {
@@ -74,6 +87,10 @@ public class HsoBridge {
         int maxHp;
         int x;
         int y;
+        int respawnSeconds = -1;
+        long respawnIntervalMs = 5000L;
+        long deathTime = 0L;
+        boolean preemptiveFired = false;
     }
     public static int pinnedMonsterId = -1;
     private static int pinnedMapId = -1;
@@ -110,6 +127,7 @@ public class HsoBridge {
         checkCommand();
         ensureMonsterScanContext();
         advanceMonsterScan(now);
+        advanceMonsterRefresh(now);
         int otherCount = 0;
         String otherName = null;
         boolean captchaFound = false;
@@ -155,15 +173,25 @@ public class HsoBridge {
         }
         restorePinnedFocus();
         
-        // Thực hiện auto nhặt đồ rơi liên tục trên toàn map nếu bật
+        // Thực hiện auto nhặt đồ rơi liên tục trên toàn map nếu bật (tuân thủ bộ lọc đồ)
         if (isAutoPickup && GameScreen.player != null && GameScreen.Vecplayers != null) {
             if (now - lastPickupTime >= 200) {
                 lastPickupTime = now;
-                for (int i = 0; i < GameScreen.Vecplayers.size(); ++i) {
-                    MainObject obj = (MainObject)GameScreen.Vecplayers.elementAt(i);
-                    if (obj != null && !obj.isRemove && (obj.typeObject == 3 || obj.typeObject == 4 || obj.typeObject == 5 || obj.typeObject == 7)) {
-                        GlobalService.gI().Get_Item_Map((short)obj.ID, obj.typeObject);
-                        obj.isSend = false;
+                Object[] arr = null;
+                try {
+                    synchronized (GameScreen.Vecplayers) {
+                        int sz = GameScreen.Vecplayers.size();
+                        arr = new Object[sz];
+                        for (int k = 0; k < sz; ++k) arr[k] = GameScreen.Vecplayers.elementAt(k);
+                    }
+                } catch (Exception ignored) {}
+                if (arr != null) {
+                    for (int i = 0; i < arr.length; ++i) {
+                        MainObject obj = (MainObject)arr[i];
+                        if (shouldPickupItem(obj)) {
+                            GlobalService.gI().Get_Item_Map((short)obj.ID, obj.typeObject);
+                            obj.isSend = false;
+                        }
                     }
                 }
             }
@@ -186,9 +214,8 @@ public class HsoBridge {
                         lastFarmAttemptTime = now;
                     }
                 }
-            } else if (farmConfigured) {
-                if (GameCanvas.loadmap != null && farmMapId == GameCanvas.loadmap.idMap
-                        && farmArea == LoadMap.Area) {
+            } else if (farmConfigured && farmTargetIds != null && farmTargetIds.length > 0) {
+                if (GameCanvas.loadmap != null && farmMapId == GameCanvas.loadmap.idMap) {
                     fireFarmBurst(now);
                 }
             } else if (GameScreen.player.Action != 4 && GameScreen.player.hp > 0) {
@@ -221,9 +248,30 @@ public class HsoBridge {
                 }
 
                 if (pinnedMonsterId >= 0) {
-                    // Mục tiêu ghim được đánh bằng ID, không đổi sang quái gần hơn.
-                    if (validTarget && ListSkill.canAttack()) {
-                        GameScreen.player.setAutoFire();
+                    // Mục tiêu ghim được đánh bằng ID, không đổi sang quái gần hơn
+                    target = findPinnedMonster();
+                    MonsterRecord rec = findMonsterRecord(pinnedMonsterId);
+                    boolean isAlive = (target != null && target.hp > 0 && !target.isDie && !target.isRemove && target.Action != 4)
+                                   || (rec != null && rec.hp > 0);
+                    if (isAlive) {
+                        if (target != null) {
+                            GameScreen.ObjFocus = target;
+                            PaintInfoGameScreen.isPaintInfoFocus = true;
+                        }
+                        if (now - lastFarmAttemptTime >= 350L && !isStrikeActive) {
+                            // Dịch chuyển tọa độ sát quái trên server nếu ở ngoài tầm cận chiến (> 25px)
+                            // giúp server luôn chấp nhận đòn đánh kể cả quái ở cự ly gần 30-50px hay xa
+                            if (target != null && MainObject.getDistance(GameScreen.player.x, GameScreen.player.y, target.x, target.y) > 25) {
+                                lastRemoteMoveTime = now;
+                                lastRemoteTargetX = (short)target.x;
+                                lastRemoteTargetY = (short)target.y;
+                                GlobalService.gI().player_move((short)target.x, (short)target.y);
+                            }
+                            mVector targets = new mVector("Auto attack pinned monster");
+                            targets.addElement(new Object_Effect_Skill((short)pinnedMonsterId, (byte)1));
+                            GlobalService.gI().fire_monster(targets, (byte)0);
+                            lastFarmAttemptTime = now;
+                        }
                     }
                 } else if (target != null && validTarget) {
                     // Chọn vị trí đứng ngang cạnh quái (bên trái hoặc bên phải quái)
@@ -309,6 +357,15 @@ public class HsoBridge {
                         }
                     }
                 }
+            }
+        } else if (!isAutoAttack) {
+            Player.isAutoFire = (byte)-1;
+            Player.isCurAutoFire = false;
+            GameCanvas.keyMyPressed[25] = false;
+            GameCanvas.keyMyPressed[5] = false;
+            if (GameScreen.player != null) {
+                GameScreen.player.KillFire = -1;
+                GameScreen.player.IDAttack = -1;
             }
         }
 
@@ -404,10 +461,14 @@ public class HsoBridge {
         if (monsterScanMapId == mapId && monsterScanArea == area) return;
         monsterScanMapId = mapId;
         monsterScanArea = area;
-        monsterScanNextId = -1;
+        monsterScanNextId = 0;
         monsterScanDone = false;
         monsterScanLimit = MONSTER_SCAN_INITIAL_LIMIT;
+        lastMonsterScanRequest = 0;
+        monsterRefreshIndex = 0;
+        lastMonsterRefreshTime = 0;
         mapMonsterRecords.removeAllElements();
+        logDebug("Auto Fam scan started map=" + monsterScanMapId + " area=" + monsterScanArea);
     }
 
     private static synchronized MonsterRecord findMonsterRecord(int id) {
@@ -427,13 +488,66 @@ public class HsoBridge {
             mapMonsterRecords.addElement(record);
         }
         record.name = obj.name;
-        record.hp = obj.hp;
         record.maxHp = obj.maxHp;
         record.x = obj.x;
         record.y = obj.y;
+        if (obj instanceof MainMonster) {
+            int t = ((MainMonster)obj).timeReveice;
+            if (t > 0) {
+                record.respawnSeconds = t;
+                record.respawnIntervalMs = (long)t * 1000L;
+            }
+        }
+        if (obj.isDie || obj.Action == 4 || obj.hp <= 0) {
+            record.hp = 0;
+            if (record.deathTime <= 0L) {
+                record.deathTime = System.currentTimeMillis();
+                record.preemptiveFired = false;
+            }
+        } else {
+            if (record.hp <= 0 && record.deathTime > 0L) {
+                long measured = System.currentTimeMillis() - record.deathTime;
+                if (measured > 1500L && measured < 60000L) {
+                    record.respawnIntervalMs = measured;
+                }
+                record.deathTime = 0L;
+                record.preemptiveFired = false;
+            }
+            record.hp = obj.hp;
+        }
+    }
+
+    public static synchronized void updateMonsterPosition(int id, int x, int y) {
+        MonsterRecord record = findMonsterRecord(id);
+        if (record != null) {
+            record.x = x;
+            record.y = y;
+        }
+    }
+
+    public static void stopAllAutoAttack() {
+        isAutoAttack = false;
+        huntTargetId = -1;
+        Player.isAutoFire = (byte)-1;
+        Player.isCurAutoFire = false;
+        GameCanvas.keyMyPressed[25] = false;
+        GameCanvas.keyMyPressed[5] = false;
+        if (GameScreen.player != null) {
+            GameScreen.player.posTransRoad = null;
+            GameScreen.player.toX = GameScreen.player.x;
+            GameScreen.player.toY = GameScreen.player.y;
+            GameScreen.player.resetMove();
+            GameScreen.player.KillFire = -1;
+            GameScreen.player.IDAttack = -1;
+            GameScreen.player.vecObjFocusSkill = null;
+        }
     }
 
     public static synchronized void rememberMonsterInfo(int id, int lv, int x, int y, int hp, int maxHp) {
+        rememberMonsterInfo(id, lv, x, y, hp, maxHp, -1);
+    }
+
+    public static synchronized void rememberMonsterInfo(int id, int lv, int x, int y, int hp, int maxHp, int timeReveice) {
         ensureMonsterScanContext();
         if (monsterScanMapId < 0) return;
         MonsterRecord record = findMonsterRecord(id);
@@ -458,26 +572,60 @@ public class HsoBridge {
         }
         if (name != null && name.length() > 0) record.name = name;
         if (record.name == null) record.name = "Chưa rõ loại";
-        record.hp = hp;
         record.maxHp = maxHp;
         record.x = x;
         record.y = y;
+
+        if (timeReveice > 0) {
+            record.respawnSeconds = timeReveice;
+            record.respawnIntervalMs = (long)timeReveice * 1000L;
+        }
+
+        if (record.hp <= 0 && hp > 0) {
+            if (record.deathTime > 0L) {
+                long measured = System.currentTimeMillis() - record.deathTime;
+                if (measured > 1500L && measured < 60000L) {
+                    record.respawnIntervalMs = measured;
+                }
+            }
+            record.deathTime = 0L;
+            record.preemptiveFired = false;
+        } else if (hp <= 0) {
+            if (record.deathTime <= 0L) {
+                record.deathTime = System.currentTimeMillis();
+                record.preemptiveFired = false;
+            }
+        }
+        record.hp = hp;
     }
 
     public static synchronized void markMonsterDead(int id) {
         MonsterRecord record = findMonsterRecord(id);
-        if (record != null) record.hp = 0;
+        if (record != null) {
+            record.hp = 0;
+            if (record.deathTime <= 0L) {
+                record.deathTime = System.currentTimeMillis();
+                record.preemptiveFired = false;
+            }
+        }
     }
 
     public static synchronized void updateMonsterHealth(int id, int hp) {
         MonsterRecord record = findMonsterRecord(id);
-        if (record != null) record.hp = Math.max(0, hp);
+        if (record != null) {
+            record.hp = Math.max(0, hp);
+            if (record.hp == 0) {
+                if (record.deathTime <= 0L) {
+                    record.deathTime = System.currentTimeMillis();
+                    record.preemptiveFired = false;
+                }
+            }
+        }
     }
 
     public static synchronized void noteFarmDamageResult(int attackerId, int monsterId, int damage) {
         if (!isFarmAttackActive() || GameScreen.player == null
-                || attackerId != GameScreen.player.ID || damage <= 0
-                || !isConfiguredFarmTarget(monsterId)) return;
+                || attackerId != GameScreen.player.ID || damage <= 0) return;
         ++farmDamageResults;
         Integer id = Integer.valueOf(monsterId);
         if (!farmDamagedIds.contains(id)) farmDamagedIds.addElement(id);
@@ -488,11 +636,17 @@ public class HsoBridge {
     }
 
     public static boolean isFarmAttackActive() {
-        return isAutoAttack && farmConfigured && GameCanvas.loadmap != null
-                && farmMapId == GameCanvas.loadmap.idMap && farmArea == LoadMap.Area;
+        return isAutoAttack && farmConfigured && farmTargetIds != null && farmTargetIds.length > 0
+                && GameCanvas.loadmap != null && farmMapId == GameCanvas.loadmap.idMap;
     }
 
-    private static boolean isConfiguredFarmTarget(int id) {
+    public static boolean isFarmConfigured() {
+        return farmConfigured && farmTargetIds != null && farmTargetIds.length > 0
+                && GameCanvas.loadmap != null && farmMapId == GameCanvas.loadmap.idMap;
+    }
+
+    public static boolean isConfiguredFarmTarget(int id) {
+        if (farmTargetIds == null) return false;
         for (int i = 0; i < farmTargetIds.length; ++i) {
             if (farmTargetIds[i] == id) return true;
         }
@@ -512,6 +666,17 @@ public class HsoBridge {
         return null;
     }
 
+    public static synchronized void onMonsterRespawned(int id, int x, int y) {
+        MonsterRecord rec = findMonsterRecord(id);
+        if (rec != null) {
+            rec.hp = rec.maxHp > 0 ? rec.maxHp : 1;
+            rec.x = x;
+            rec.y = y;
+            rec.deathTime = 0L;
+            rec.preemptiveFired = false;
+        }
+    }
+
     public static boolean isMonsterAlive(int id) {
         if (GameScreen.Vecplayers != null) {
             MainObject obj = MainObject.get_Object(id, (byte)1);
@@ -524,26 +689,25 @@ public class HsoBridge {
                     rec.hp = obj.hp;
                     rec.x = obj.x;
                     rec.y = obj.y;
+                    if (rec.deathTime > 0L) {
+                        rec.deathTime = 0L;
+                        rec.preemptiveFired = false;
+                    }
                 }
                 return true;
             }
         }
         MonsterRecord rec = findMonsterRecord(id);
-        return rec == null || rec.hp > 0;
+        return rec != null && rec.hp > 0;
     }
 
-    private static synchronized void startMonsterScan() {
+    public static synchronized void startMonsterScan() {
         ensureMonsterScanContext();
-        if (monsterScanMapId < 0 || monsterScanNextId >= 0 || monsterScanDone) return;
-        for (int i = 0; i < mapMonsterRecords.size(); ++i) {
-            MonsterRecord record = (MonsterRecord)mapMonsterRecords.elementAt(i);
-            if (record.id >= monsterScanLimit - 64) {
-                monsterScanLimit = Math.min(MONSTER_SCAN_MAX_LIMIT, record.id + 128);
-            }
-        }
+        if (monsterScanMapId < 0) return;
         monsterScanNextId = 0;
+        monsterScanDone = false;
         lastMonsterScanRequest = 0;
-        logDebug("Auto Fam scan started map=" + monsterScanMapId + " area=" + monsterScanArea);
+        logDebug("Auto Fam scan start/restart map=" + monsterScanMapId + " area=" + monsterScanArea);
     }
 
     private static synchronized void advanceMonsterScan(long now) {
@@ -563,16 +727,69 @@ public class HsoBridge {
             logDebug("Auto Fam scan finished records=" + mapMonsterRecords.size());
             return;
         }
-        int id = monsterScanNextId++;
+        int batch = 6;
+        while (batch-- > 0 && monsterScanNextId < monsterScanLimit) {
+            int id = monsterScanNextId++;
+            if (findMonsterRecord(id) == null) {
+                GlobalService.gI().monster_info((short)id);
+            }
+        }
         lastMonsterScanRequest = now;
-        if (findMonsterRecord(id) == null) GlobalService.gI().monster_info((short)id);
+    }
+
+    private static synchronized void advanceMonsterRefresh(long now) {
+        if (!monsterScanDone) return;
+        if (GameCanvas.currentScreen != GameCanvas.game || GameCanvas.loadmap == null
+                || GameCanvas.loadmap.idMap != monsterScanMapId || LoadMap.Area != monsterScanArea
+                || mapMonsterRecords.size() == 0) return;
+
+        // 1. Quét các quái đã chết: nếu đã đến hoặc quá thời gian hồi sinh thì khôi phục và truy vấn server ngay
+        for (int i = 0; i < mapMonsterRecords.size(); ++i) {
+            MonsterRecord rec = (MonsterRecord)mapMonsterRecords.elementAt(i);
+            if (rec != null && rec.hp <= 0 && rec.deathTime > 0L) {
+                long interval = rec.respawnIntervalMs > 0 ? rec.respawnIntervalMs : 5000L;
+                if (now - rec.deathTime >= interval) {
+                    if (rec.maxHp > 0) rec.hp = rec.maxHp;
+                    rec.deathTime = 0L;
+                    GlobalService.gI().monster_info((short)rec.id);
+                }
+            }
+        }
+
+        // 2. Định kỳ round-robin gửi truy vấn monster_info cho toàn bộ quái trên map để đồng bộ tọa độ và máu thời gian thực
+        if (now - lastMonsterRefreshTime < 60L) return;
+        lastMonsterRefreshTime = now;
+
+        int size = mapMonsterRecords.size();
+        if (size == 0) return;
+
+        int batch = 4;
+        while (batch-- > 0) {
+            if (monsterRefreshIndex >= size) monsterRefreshIndex = 0;
+            MonsterRecord rec = (MonsterRecord)mapMonsterRecords.elementAt(monsterRefreshIndex++);
+            if (rec != null) {
+                GlobalService.gI().monster_info((short)rec.id);
+            }
+        }
     }
 
     private static synchronized String mapMonstersJson() {
         if (GameScreen.Vecplayers != null) {
-            for (int i = 0; i < GameScreen.Vecplayers.size(); ++i) {
-                MainObject obj = (MainObject)GameScreen.Vecplayers.elementAt(i);
-                rememberLocalMonster(obj);
+            Object[] array = null;
+            try {
+                synchronized (GameScreen.Vecplayers) {
+                    int sz = GameScreen.Vecplayers.size();
+                    array = new Object[sz];
+                    for (int k = 0; k < sz; ++k) {
+                        array[k] = GameScreen.Vecplayers.elementAt(k);
+                    }
+                }
+            } catch (Exception ignored) {}
+            if (array != null) {
+                for (int i = 0; i < array.length; ++i) {
+                    MainObject obj = (MainObject)array[i];
+                    rememberLocalMonster(obj);
+                }
             }
         }
         StringBuffer result = new StringBuffer("[");
@@ -585,30 +802,60 @@ public class HsoBridge {
                   .append(",\"maxHp\":").append(record.maxHp)
                   .append(",\"x\":").append(record.x)
                   .append(",\"y\":").append(record.y)
+                  .append(",\"respawn\":").append(record.respawnSeconds)
+                  .append(",\"respawn_ms\":").append(record.respawnIntervalMs)
+                  .append(",\"death_time\":").append(record.deathTime)
                   .append("}");
         }
         return result.append("]").toString();
     }
 
+    private static final long PREEMPTIVE_LEAD_MS = 500L;
+
+    public static int getNormalAttackCooldownMs() {
+        try {
+            Player player = GameScreen.player;
+            if (player != null && Player.mKillPlayer != null && Player.mKillPlayer.length > 0) {
+                int skillId = Player.mKillPlayer[0];
+                Skill skill = MainListSkill.getSkillFormId(skillId);
+                if (skill != null && skill.mLvSkill != null) {
+                    int lvIdx = 0;
+                    if (Player.mCurentLvSkill != null && skillId < Player.mCurentLvSkill.length) {
+                        lvIdx = Player.mCurentLvSkill[skillId] + (Player.mPlusLvSkill != null && skillId < Player.mPlusLvSkill.length ? Player.mPlusLvSkill[skillId] : 0) - 1;
+                    }
+                    if (lvIdx >= 0 && lvIdx < skill.mLvSkill.length) {
+                        int d = skill.mLvSkill[lvIdx].getdelay();
+                        if (d > 0) return d;
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return 1000; // Mặc định chuẩn 1s (1000ms) theo kỹ năng đánh thường
+    }
+
     private static void fireFarmBurst(long now) {
+        if (!isAutoAttack || !farmConfigured || farmTargetIds == null || farmTargetIds.length == 0) return;
         Player player = GameScreen.player;
-        if (player == null || player.hp <= 0 || player.Action == 2 || player.Action == 4
-                || player.currentQuest != null || player.isTanHinh || farmTargetIds.length == 0) return;
+        if (player == null || player.hp <= 0 || player.Action == 4
+                || player.currentQuest != null || player.isTanHinh) return;
 
-        if (now - lastFarmAttemptTime < 250L) return;
+        // Chu kỳ tấn công giữa các đòn đánh liên tiếp: Đồng bộ chuẩn xác theo thời gian hồi chiêu đánh thường (1s)
+        // Trừ 50ms bù trừ độ trễ mạng TCP (latency) để gói tin tới server đúng lúc vừa hết hồi chiêu 1s
+        long attackCooldown = Math.max(800L, (long)getNormalAttackCooldownMs() - 50L);
+        if (now - lastFarmAttemptTime < attackCooldown) return;
 
-        int[] liveIds = getLiveFarmTargets(player);
-        if (liveIds.length == 0) return;
+        int[] targets = getLiveFarmTargets(player, now);
+        if (targets == null || targets.length == 0) return;
 
-        player.IDAttack = liveIds[0];
+        player.IDAttack = targets[0];
 
-        // 1. Don gom toan bo quai con song tren map vao 1 danh sach de tan cong 1 hit ca map
+        // 1. Dồn gom toàn bộ quái trên map vào 1 danh sách để tấn công 1 hit cả map
         mVector allTargets = new mVector("Auto Farm All Map Targets");
-        for (int i = 0; i < liveIds.length; ++i) {
-            allTargets.addElement(new Object_Effect_Skill((short)liveIds[i], (byte)1));
+        for (int i = 0; i < targets.length; ++i) {
+            allTargets.addElement(new Object_Effect_Skill((short)targets[i], (byte)1));
         }
 
-        // 2. Tim chieu tan cong san sang tren thanh phim tat (neu co)
+        // 2. Tìm chiêu tấn công sẵn sàng trên thanh phím tắt (nếu có chiêu đánh lan)
         int readySkillId = -1;
         int hotkeyIdx = -1;
         if (player.mhotkey != null && Player.levelTab < player.mhotkey.length) {
@@ -628,7 +875,7 @@ public class HsoBridge {
             }
         }
 
-        // 3. Phong goi tin 1 hit chua TOAN BO quai tren map
+        // 3. Phóng gói tin 1 hit chứa toàn bộ quái trên map (nếu có chiêu lan)
         if (readySkillId >= 0) {
             GlobalService.gI().fire_monster(allTargets, (byte)readySkillId);
             player.setAddDelaySkill(readySkillId, hotkeyIdx);
@@ -636,46 +883,68 @@ public class HsoBridge {
             GlobalService.gI().fire_monster(allTargets, (byte)0);
         }
 
-        // 4. Dong thoi gui kem goi danh rieng biet cho tung quai de dam bao 100% quai tren map deu dinh don
-        for (int i = 0; i < liveIds.length; ++i) {
+        // 4. ĐỒNG THỜI GỬI KÈM GÓI ĐÁNH CHO TỪNG QUÁI TRONG CÙNG 1 TICK (BURST 1 HIT)
+        // Cơ chế gốc học từ Git: Chiêu 0 (đánh thường) trên server HSO chỉ xử lý đơn mục tiêu.
+        // Khi gom nhiều quái vào 1 gói tin skill 0, server chỉ trừ máu quái đầu tiên và bỏ qua quái sau.
+        // Vòng lặp bắn toàn bộ N gói tin single trong < 1ms giúp TCP socket đẩy toàn bộ gói trong cùng 1 frame,
+        // server xử lý và trừ máu TOÀN BỘ quái cùng lúc, tiêu diệt 100% quái trong 1 hit duy nhất!
+        for (int i = 0; i < targets.length; ++i) {
             mVector single = new mVector("Auto Farm Single Target");
-            single.addElement(new Object_Effect_Skill((short)liveIds[i], (byte)1));
+            single.addElement(new Object_Effect_Skill((short)targets[i], (byte)1));
             GlobalService.gI().fire_monster(single, (byte)0);
         }
 
         lastFarmAttemptTime = now;
     }
 
-    private static int[] getLiveFarmTargets(Player player) {
-        if (farmTargetIds == null || farmTargetIds.length == 0) return new int[0];
-        int count = 0;
-        for (int i = 0; i < farmTargetIds.length; ++i) {
-            if (isMonsterAlive(farmTargetIds[i])) {
-                ++count;
+    private static int[] getLiveFarmTargets(Player player, long now) {
+        int[] idsToCheck = farmTargetIds;
+        if (idsToCheck == null || idsToCheck.length == 0) return new int[0];
+
+        int aliveCount = 0;
+        for (int i = 0; i < idsToCheck.length; ++i) {
+            if (isMonsterAlive(idsToCheck[i])) {
+                ++aliveCount;
             }
         }
-        if (count == 0) return new int[0];
-        int[] ids = new int[count];
-        int idx = 0;
-        for (int i = 0; i < farmTargetIds.length; ++i) {
-            if (isMonsterAlive(farmTargetIds[i])) {
-                ids[idx++] = farmTargetIds[i];
+
+        // TÌNH HUỐNG 1: CÓ QUÁI ĐANG SỐNG (kể cả 1 con hay toàn map)
+        // -> LẬP TỨC ĐÁNH NGAY TOÀN BỘ CÁC CON ĐANG SỐNG!
+        // Quái cần 2-3 hit mới chết sẽ được dồn đòn liên tục theo đúng nhịp hồi chiêu đánh thường (mỗi 250ms),
+        // tuyệt đối KHÔNG ĐƯỢC nhịn đánh hay chờ đợi bất kỳ con quái nào đã chết!
+        if (aliveCount > 0) {
+            int[] liveIds = new int[aliveCount];
+            int idx = 0;
+            for (int i = 0; i < idsToCheck.length; ++i) {
+                if (isMonsterAlive(idsToCheck[i])) {
+                    liveIds[idx++] = idsToCheck[i];
+                }
+            }
+            return liveIds;
+        }
+
+        // TÌNH HUỐNG 2: TOÀN BỘ QUÁI ĐỀU ĐÃ CHẾT (aliveCount == 0)
+        // -> Chờ đón đầu thời điểm quái hồi sinh sớm 500ms
+        long earliestRespawnDueTime = 0L;
+        for (int i = 0; i < idsToCheck.length; ++i) {
+            MonsterRecord rec = findMonsterRecord(idsToCheck[i]);
+            if (rec != null && rec.deathTime > 0L) {
+                long interval = rec.respawnIntervalMs > 0 ? rec.respawnIntervalMs : 5000L;
+                // Bỏ qua các boss / quái đặc biệt có thời gian hồi sinh cực dài (> 60s)
+                if (interval > 60000L) continue;
+                long due = rec.deathTime + interval;
+                if (earliestRespawnDueTime == 0L || due < earliestRespawnDueTime) {
+                    earliestRespawnDueTime = due;
+                }
             }
         }
-        for (int i = 0; i < ids.length; ++i) {
-            int best = i;
-            long bestScore = farmTargetScore(player, ids[i]);
-            for (int j = i + 1; j < ids.length; ++j) {
-                long score = farmTargetScore(player, ids[j]);
-                if (score >= bestScore) continue;
-                best = j;
-                bestScore = score;
-            }
-            int swap = ids[i];
-            ids[i] = ids[best];
-            ids[best] = swap;
+
+        long threshold = earliestRespawnDueTime > 0L ? earliestRespawnDueTime : (now + 5000L);
+        if (now >= threshold - PREEMPTIVE_LEAD_MS) {
+            return idsToCheck;
         }
-        return ids;
+
+        return new int[0];
     }
 
     private static long farmTargetScore(Player player, int id) {
@@ -718,23 +987,29 @@ public class HsoBridge {
         String ids = extractJsonValue(cmd, "ids");
         if (map == null || area == null || configured == null || ids == null) return;
         farmMapId = Integer.parseInt(map);
-        farmArea = Integer.parseInt(area);
-        farmConfigured = Integer.parseInt(configured) != 0;
+        try {
+            farmArea = Integer.parseInt(area);
+        } catch (Exception e) {
+            farmArea = -1;
+        }
         ids = ids.replace("\"", "").trim();
-        if (ids.length() == 0 || !farmConfigured) {
+        boolean isConf = Integer.parseInt(configured) != 0;
+        if (ids.length() == 0 || !isConf) {
+            farmConfigured = false;
             farmTargetIds = new int[0];
         } else {
             String[] parts = ids.split(";");
             int[] parsedIds = new int[parts.length];
             for (int i = 0; i < parts.length; ++i) parsedIds[i] = Integer.parseInt(parts[i]);
             farmTargetIds = parsedIds;
+            farmConfigured = (farmTargetIds.length > 0);
         }
         farmPacketsSent = 0;
         farmDamageResults = 0;
         farmTargetCursor = 0;
         farmDamagedIds.removeAllElements();
         if (isFarmAttackActive()) stopFarmAutoMovement();
-        logDebug("Auto Fam configured=" + farmConfigured + " targets=" + farmTargetIds.length);
+        logDebug("Auto Fam configured=" + farmConfigured + " targets=" + farmTargetIds.length + " map=" + farmMapId + " area=" + farmArea);
     }
 
     private static short[] findPathTo(int targetX, int targetY) {
@@ -763,13 +1038,45 @@ public class HsoBridge {
         return t != 1 && t != -1;
     }
 
+    public static boolean shouldPickupItem(MainObject obj) {
+        if (obj == null || obj.isRemove) return false;
+        if (obj.typeObject == 3) {
+            switch (obj.colorName) {
+                case 0: return lootWhite;
+                case 1: return lootBlue;
+                case 2: return lootYellow;
+                case 3: return lootPurple;
+                case 4: return lootOrange;
+                case 5: return lootGreen;
+                default: return lootWhite;
+            }
+        } else if (obj.typeObject == 4) {
+            String n = (obj.name != null) ? obj.name.toLowerCase() : "";
+            if (n.indexOf("vàng") != -1 || n.indexOf("vang") != -1 || n.indexOf("xu") != -1 || n.indexOf("coin") != -1 || obj.colorName == 2) {
+                return lootGold;
+            }
+            if (n.indexOf("mana") != -1 || n.indexOf("mp") != -1 || obj.colorName == 1) {
+                return lootMp;
+            }
+            if (n.indexOf("máu") != -1 || n.indexOf("mau") != -1 || n.indexOf("hp") != -1 || obj.colorName == 0) {
+                return lootHp;
+            }
+            return lootHp || lootMp || lootGold;
+        } else if (obj.typeObject == 5) {
+            return lootQuest;
+        } else if (obj.typeObject == 7) {
+            return lootMaterial;
+        }
+        return false;
+    }
+
     private static MainObject findNearestItem() {
         if (GameScreen.Vecplayers == null || GameScreen.player == null) return null;
         int minDistance = Integer.MAX_VALUE;
         MainObject nearest = null;
         for (int i = 0; i < GameScreen.Vecplayers.size(); ++i) {
             MainObject obj = (MainObject)GameScreen.Vecplayers.elementAt(i);
-            if (obj != null && !obj.isRemove && (obj.typeObject == 3 || obj.typeObject == 4 || obj.typeObject == 5 || obj.typeObject == 7)) {
+            if (shouldPickupItem(obj)) {
                 int d = MainObject.getDistance(GameScreen.player.x, GameScreen.player.y, obj.x, obj.y);
                 if (d < minDistance) {
                     minDistance = d;
@@ -857,21 +1164,33 @@ public class HsoBridge {
 
     public static void pinMonster(int id, int mapId, int area) {
         if (GameCanvas.currentScreen != GameCanvas.game || GameCanvas.loadmap == null
-                || GameCanvas.loadmap.idMap != mapId || LoadMap.Area != area || GameScreen.Vecplayers == null) {
+                || GameCanvas.loadmap.idMap != mapId || LoadMap.Area != area) {
             logDebug("pinMonster: stale map or area for ID " + id);
             return;
         }
-        for (int i = 0; i < GameScreen.Vecplayers.size(); ++i) {
-            MainObject obj = (MainObject)GameScreen.Vecplayers.elementAt(i);
-            if (obj != null && obj.typeObject == 1 && obj.ID == id
-                    && !obj.isRemove && !obj.isDie && obj.hp > 0 && obj.Action != 4) {
-                clearPinnedPlayer();
-                pinnedMonsterId = id;
-                pinnedMapId = mapId;
-                pinnedArea = area;
-                restorePinnedFocus();
-                logDebug("Pinned monster ID " + id);
-                return;
+        MonsterRecord rec = findMonsterRecord(id);
+        if (rec != null) {
+            clearPinnedPlayer();
+            pinnedMonsterId = id;
+            pinnedMapId = mapId;
+            pinnedArea = area;
+            restorePinnedFocus();
+            logDebug("Pinned monster ID " + id + " (" + rec.name + ")");
+            return;
+        }
+        if (GameScreen.Vecplayers != null) {
+            for (int i = 0; i < GameScreen.Vecplayers.size(); ++i) {
+                MainObject obj = (MainObject)GameScreen.Vecplayers.elementAt(i);
+                if (obj != null && obj.typeObject == 1 && obj.ID == id
+                        && !obj.isRemove && !obj.isDie && obj.hp > 0 && obj.Action != 4) {
+                    clearPinnedPlayer();
+                    pinnedMonsterId = id;
+                    pinnedMapId = mapId;
+                    pinnedArea = area;
+                    restorePinnedFocus();
+                    logDebug("Pinned monster ID " + id);
+                    return;
+                }
             }
         }
         logDebug("pinMonster: monster ID " + id + " is unavailable");
@@ -938,17 +1257,10 @@ public class HsoBridge {
 
     public static void paintPinnedTargetHud(mGraphics g) {
         if (GameScreen.player == null) return;
+        if (pinnedPlayerId == -1) return; // Chỉ vẽ HUD banner cho người chơi PK được ghim
 
-        MainObject target = null;
-        boolean isPlayer = false;
-        if (pinnedPlayerId != -1) {
-            target = findPinnedPlayer();
-            isPlayer = true;
-        } else if (pinnedMonsterId != -1) {
-            target = findPinnedMonster();
-            isPlayer = false;
-        }
-
+        MainObject target = findPinnedPlayer();
+        boolean isPlayer = true;
         if (target == null) return;
 
         GameCanvas.resetTrans(g);
@@ -1211,10 +1523,14 @@ public class HsoBridge {
         // 2. Trường hợp có ghim Quái vật -> Tấn công quái vật được ghim
         if (pinnedMonsterId != -1) {
             MainObject target = findPinnedMonster();
-            if (target == null || target.Action == 4 || target.isDie || target.isRemove) {
+            MonsterRecord rec = findMonsterRecord(pinnedMonsterId);
+            boolean isAlive = (target != null && target.Action != 4 && !target.isDie && !target.isRemove && target.hp > 0)
+                           || (rec != null && rec.hp > 0);
+            if (!isAlive) {
                 return true;
             }
-            if (player.Action == 2) {
+
+            if (player.Action == 2 || player.Action == 4 || player.isDie) {
                 return true;
             }
             if (skillId > 0 && !player.setDelaySkill(skillId, hotkeyIndex)) {
@@ -1223,13 +1539,19 @@ public class HsoBridge {
             if (skillId == 0 && !ListSkill.canAttack()) {
                 return true;
             }
+            if (skillId == 0) {
+                ListSkill.doSetTimeAtt();
+            }
 
-            pinnedMonsterId = target.ID;
-            GameScreen.ObjFocus = target;
-            PaintInfoGameScreen.isPaintInfoFocus = true;
+            if (target != null) {
+                GameScreen.ObjFocus = target;
+                PaintInfoGameScreen.isPaintInfoFocus = true;
+            }
 
-            player.setStartSkill(skillId, false);
-            logDebug("firePinnedSkill: fired via setStartSkill at monster ID=" + target.ID + " skill=" + skillId);
+            mVector targets = new mVector("Pinned monster target");
+            targets.addElement(new Object_Effect_Skill((short)pinnedMonsterId, (byte)1));
+            GlobalService.gI().fire_monster(targets, (byte)skillId);
+            logDebug("firePinnedSkill: fired at pinned monster ID=" + pinnedMonsterId + " skill=" + skillId);
             return true;
         }
 
@@ -1280,6 +1602,28 @@ public class HsoBridge {
         else if (brace != -1) end = brace;
         if (end != -1) sub = sub.substring(0, end).trim();
         return sub;
+    }
+
+    private static boolean isJsonBoolTrue(String json, String key) {
+        String val = extractJsonValue(json, key);
+        if (val == null) return false;
+        val = val.trim().toLowerCase();
+        return val.equals("true") || val.equals("1");
+    }
+
+    public static void configureLootFilter(String cmd) {
+        if (cmd == null) return;
+        if (cmd.indexOf("\"white\":") != -1) lootWhite = isJsonBoolTrue(cmd, "white");
+        if (cmd.indexOf("\"blue\":") != -1) lootBlue = isJsonBoolTrue(cmd, "blue");
+        if (cmd.indexOf("\"yellow\":") != -1) lootYellow = isJsonBoolTrue(cmd, "yellow");
+        if (cmd.indexOf("\"purple\":") != -1) lootPurple = isJsonBoolTrue(cmd, "purple");
+        if (cmd.indexOf("\"orange\":") != -1) lootOrange = isJsonBoolTrue(cmd, "orange");
+        if (cmd.indexOf("\"green\":") != -1) lootGreen = isJsonBoolTrue(cmd, "green");
+        if (cmd.indexOf("\"hp\":") != -1) lootHp = isJsonBoolTrue(cmd, "hp");
+        if (cmd.indexOf("\"mp\":") != -1) lootMp = isJsonBoolTrue(cmd, "mp");
+        if (cmd.indexOf("\"gold\":") != -1) lootGold = isJsonBoolTrue(cmd, "gold");
+        if (cmd.indexOf("\"material\":") != -1) lootMaterial = isJsonBoolTrue(cmd, "material");
+        if (cmd.indexOf("\"quest\":") != -1) lootQuest = isJsonBoolTrue(cmd, "quest");
     }
 
     private static void checkCommand() {
@@ -1339,7 +1683,15 @@ public class HsoBridge {
                 String id = extractJsonValue(cmd, "id");
                 int monId = id != null ? Integer.parseInt(id) : pinnedMonsterId;
                 if (monId >= 0 && GameScreen.player != null) {
-                    GameScreen.player.setAutoFire();
+                    MainObject target = findPinnedMonster();
+                    if (target != null) {
+                        GameScreen.ObjFocus = target;
+                        PaintInfoGameScreen.isPaintInfoFocus = true;
+                    }
+                    mVector targets = new mVector("Attack pinned monster");
+                    targets.addElement(new Object_Effect_Skill((short)monId, (byte)1));
+                    GlobalService.gI().fire_monster(targets, (byte)0);
+                    logDebug("attack_monster command executed: ID=" + monId);
                 }
             }
 
@@ -1411,15 +1763,17 @@ public class HsoBridge {
                 if (cmd.indexOf("\"enabled\": true") != -1 || cmd.indexOf("\"enabled\":true") != -1 || cmd.indexOf("\"enabled\": 1") != -1) {
                     isAutoAttack = true;
                     if (isFarmAttackActive()) stopFarmAutoMovement();
-                } else if (cmd.indexOf("\"enabled\": false") != -1 || cmd.indexOf("\"enabled\":false") != -1 || cmd.indexOf("\"enabled\": 0") != -1) {
-                    isAutoAttack = false;
-                    huntTargetId = -1;
+                    GameScreen.ObjFocus = null;
+                    PaintInfoGameScreen.isPaintInfoFocus = false;
                     if (GameScreen.player != null) {
+                        GameScreen.player.KillFire = -1;
+                        GameScreen.player.IDAttack = -1;
                         GameScreen.player.posTransRoad = null;
-                        GameScreen.player.toX = GameScreen.player.x;
-                        GameScreen.player.toY = GameScreen.player.y;
-                        GameScreen.player.resetMove();
                     }
+                    GameCanvas.keyMyPressed[25] = false;
+                    GameCanvas.keyMyPressed[5] = false;
+                } else if (cmd.indexOf("\"enabled\": false") != -1 || cmd.indexOf("\"enabled\":false") != -1 || cmd.indexOf("\"enabled\": 0") != -1) {
+                    stopAllAutoAttack();
                 }
             }
 
@@ -1430,6 +1784,12 @@ public class HsoBridge {
                 } else if (cmd.indexOf("\"enabled\": false") != -1 || cmd.indexOf("\"enabled\":false") != -1 || cmd.indexOf("\"enabled\": 0") != -1) {
                     isAutoPickup = false;
                 }
+                configureLootFilter(cmd);
+            }
+
+            // Lệnh cấu hình bộ lọc đồ rơi
+            if (cmd.indexOf("\"loot_filter\"") != -1) {
+                configureLootFilter(cmd);
             }
 
             // Lệnh tốc độ
@@ -1530,12 +1890,27 @@ public class HsoBridge {
                 sb.append("\"hp\":").append(GameScreen.player.hp).append(",");
                 sb.append("\"maxHp\":").append(GameScreen.player.maxHp).append(",");
                 sb.append("\"mp\":").append(GameScreen.player.mp).append(",");
+                sb.append("\"maxMp\":").append(GameScreen.player.maxMp).append(",");
                 sb.append("\"maxmp\":").append(GameScreen.player.maxMp).append(",");
                 sb.append("\"exp\":").append((int)GameScreen.player.phantramLv).append(",");
                 sb.append("\"x\":").append(GameScreen.player.x).append(",");
                 sb.append("\"y\":").append(GameScreen.player.y).append(",");
                 sb.append("\"typePk\":").append(GameScreen.player.typePk);
                 sb.append("},");
+
+                // Snapshot an toàn danh sách đối tượng trong map
+                Object[] localPlayers = null;
+                if (GameScreen.Vecplayers != null) {
+                    try {
+                        synchronized (GameScreen.Vecplayers) {
+                            int sz = GameScreen.Vecplayers.size();
+                            localPlayers = new Object[sz];
+                            for (int k = 0; k < sz; ++k) {
+                                localPlayers[k] = GameScreen.Vecplayers.elementAt(k);
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                }
 
                 // Quét danh sách quái vật và người chơi trong map
                 int playerCount = 0;
@@ -1546,9 +1921,13 @@ public class HsoBridge {
                 sbMonsters.append("[");
                 int monsterCount = 0;
 
-                if (GameScreen.Vecplayers != null) {
-                    for (int i = 0; i < GameScreen.Vecplayers.size(); ++i) {
-                        MainObject obj = (MainObject)GameScreen.Vecplayers.elementAt(i);
+                StringBuffer sbNpcs = new StringBuffer();
+                sbNpcs.append("[");
+                int npcCount = 0;
+
+                if (localPlayers != null) {
+                    for (int i = 0; i < localPlayers.length; ++i) {
+                        MainObject obj = (MainObject)localPlayers[i];
                         if (obj == null) continue;
 
                         if (obj.typeObject == 0 && obj != GameScreen.player) {
@@ -1575,21 +1954,8 @@ public class HsoBridge {
                                       .append(",\"y\":").append(obj.y)
                                       .append("}");
                             monsterCount++;
-                        }
-                    }
-                }
-
-                sbPlayers.append("]");
-                sbMonsters.append("]");
-
-                // NPC list
-                StringBuffer sbNpcs = new StringBuffer();
-                sbNpcs.append("[");
-                int npcCount = 0;
-                if (GameScreen.Vecplayers != null) {
-                    for (int i = 0; i < GameScreen.Vecplayers.size(); ++i) {
-                        MainObject obj = (MainObject)GameScreen.Vecplayers.elementAt(i);
-                        if (obj != null && obj.typeObject == 2) {
+                        } else if (obj.typeObject == 2) {
+                            // NPC
                             if (npcCount > 0) sbNpcs.append(",");
                             sbNpcs.append("{\"id\":").append(obj.ID)
                                   .append(",\"name\":\"").append(escape(obj.name))
@@ -1600,6 +1966,9 @@ public class HsoBridge {
                         }
                     }
                 }
+
+                sbPlayers.append("]");
+                sbMonsters.append("]");
                 sbNpcs.append("]");
 
                 // Waypoints list
@@ -1665,11 +2034,13 @@ public class HsoBridge {
 
             byte[] stateBytes = sb.toString().getBytes("UTF-8");
             File target = new File(STATE_FILE);
+            File tmpTarget = new File(STATE_FILE + ".tmp");
             try {
-                FileOutputStream fos = new FileOutputStream(target);
+                FileOutputStream fos = new FileOutputStream(tmpTarget);
                 fos.write(stateBytes);
                 fos.flush();
                 fos.close();
+                tmpTarget.renameTo(target);
             } catch (Exception ignored) {}
         }
         catch (Exception exception) {

@@ -15,6 +15,8 @@
 | `run_java.bat` / `run_java.ps1` | Script 1-click khởi chạy game trực tiếp bằng MicroEmulator trên Windows. |
 | `build_jar.bat` / `build_jar.ps1` | Script 1-click biên dịch toàn bộ `src_java/` và đóng gói lại vào `KnightOnline_v403.jar`. |
 | `run_tool.sh` / `run_java.sh` | Script khởi chạy trên môi trường Linux / macOS. |
+| `TAI_LIEU_HE_THONG_AUTO.md` | **Tài liệu hệ thống Auto & Mod v1.0**: Cơ chế Radar toàn map, Auto Farm Burst Loop, nhịp đánh chuẩn 1s, đón đầu hồi sinh, bộ lọc loot và an toàn chống ban. |
+| `TAI_LIEU_CAC_FILE_VA_HAM_QUAN_TRONG.md` | Tài liệu kiến trúc toàn diện các class, hàm và luồng dữ liệu của Game Client. |
 
 ---
 

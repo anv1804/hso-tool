@@ -102,6 +102,24 @@ def farm_profile_key(map_id, area):
     return f"{int(map_id)}:{int(area)}"
 
 
+def get_map_farm_profile(config, map_id, area=None):
+    auto_farm = config.get("auto_farm", {})
+    if not auto_farm:
+        return None
+    try:
+        m_id = int(map_id)
+    except (ValueError, TypeError):
+        return None
+    if area is not None:
+        try:
+            p = auto_farm.get(farm_profile_key(m_id, int(area)))
+            if p is not None:
+                return p
+        except (ValueError, TypeError):
+            pass
+    return auto_farm.get(f"{m_id}:*") or auto_farm.get(str(m_id))
+
+
 def farm_profile_matches(profile, monster):
     return profile is not None and (
         profile.get("all", False) or
@@ -116,13 +134,41 @@ def resolve_farm_ids(profile, monsters, include_dead=False):
                   if (include_dead or m.get("hp", 0) > 0) and farm_profile_matches(profile, m))
 
 
+def compact_mob_name(name):
+    """Rút gọn tên quái siêu ngắn để hiển thị vừa vặn trong grid 2 cột."""
+    name = (name or "").strip()
+    if not name or name == "Chưa rõ loại":
+        return "Mob"
+    if name.lower().startswith("quái "):
+        name = name[5:].strip()
+    parts = name.split()
+    if not parts:
+        return "Mob"
+    if len(parts) >= 2 and parts[0] in ("Bọ", "Ốc", "Cây", "Ma", "Thằn", "Đầu", "Mặt"):
+        return (parts[0] + " " + parts[1])[:8]
+    return parts[0][:6]
+
+
+def format_mini_hp(hp):
+    """Định dạng số HP siêu gọn (ví dụ 1.2k, 15k, 1.5M) vừa vặn thanh máu mini."""
+    hp = max(0, int(hp))
+    if hp >= 1_000_000:
+        return f"{hp / 1_000_000:.1f}M"
+    if hp >= 10_000:
+        return f"{hp // 1_000}k"
+    if hp >= 1_000:
+        k = hp / 1000.0
+        return f"{k:.1f}k" if (hp % 1000 >= 100) else f"{int(k)}k"
+    return str(hp)
+
+
 def radar_projection(width, height, map_width, map_height):
-    """Return the whole-map rectangle and a shared pixel-to-canvas scale."""
+    """Return the whole-map rectangle and a shared pixel-to-canvas scale with compact padding."""
     map_width = max(1, map_width)
     map_height = max(1, map_height)
-    scale = min((width - 16) / map_width, (height - 31) / map_height)
+    scale = min((width - 32) / map_width, (height - 34) / map_height)
     draw_width, draw_height = map_width * scale, map_height * scale
-    return (width - draw_width) / 2, 7 + (height - 31 - draw_height) / 2, scale
+    return (width - draw_width) / 2, 6 + (height - 24 - draw_height) / 2, scale
 
 
 def classify_radar_npc(name):
@@ -135,11 +181,15 @@ def classify_radar_npc(name):
 
 
 def farm_profile_from_selection(monsters, selected_ids):
+    if not selected_ids:
+        return None
     groups = {}
     for monster in monsters:
         groups.setdefault(monster.get("name", "Mob"), set()).add(monster["id"])
     all_ids = {monster["id"] for monster in monsters}
     selected_ids = set(selected_ids) & all_ids
+    if not selected_ids:
+        return None
     if all_ids and selected_ids == all_ids:
         return {"all": True, "types": [], "ids": []}
     selected_types = sorted(name for name, ids in groups.items()
@@ -177,7 +227,21 @@ DEFAULT_CONFIG = {
     "fps_60": True,
     "speed": "1.0",
     "auto_attack": False,
-    "auto_pickup": False
+    "auto_pickup": False,
+    "monster_view_mode": "grid",
+    "auto_loot_filter": {
+        "white": True,
+        "blue": True,
+        "yellow": True,
+        "purple": True,
+        "orange": True,
+        "green": True,
+        "hp": True,
+        "mp": True,
+        "gold": True,
+        "material": True,
+        "quest": True,
+    }
 }
 
 
@@ -185,7 +249,11 @@ def load_config():
     if CONFIG_FILE.exists():
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                return {**DEFAULT_CONFIG, **json.load(f)}
+                loaded = json.load(f)
+                merged = {**DEFAULT_CONFIG, **loaded}
+                if "auto_loot_filter" in loaded and isinstance(loaded["auto_loot_filter"], dict):
+                    merged["auto_loot_filter"] = {**DEFAULT_CONFIG["auto_loot_filter"], **loaded["auto_loot_filter"]}
+                return merged
         except Exception:
             pass
     return DEFAULT_CONFIG.copy()
@@ -221,18 +289,26 @@ class HsoButtonRenderer:
             border_gold = (75, 52, 28)
             border_outer = (22, 10, 5)
             highlight_c = (38, 19, 12)
-        elif is_selected:
-            top_c = (118, 45, 22)
-            bot_c = (82, 28, 14)
-            border_gold = (200, 150, 62)
-            border_outer = (35, 14, 6)
-            highlight_c = (140, 65, 30)
         elif is_pressed:
             top_c = (38, 14, 6)
             bot_c = (58, 22, 10)
             border_gold = (160, 110, 40)
             border_outer = (25, 8, 4)
             highlight_c = (48, 18, 8)
+        elif is_selected:
+            # Active/Selected state rực rỡ, sáng rõ hơn với viền vàng kim loại lấp lánh
+            if is_hover:
+                top_c = (195, 90, 32)
+                bot_c = (135, 56, 20)
+                border_gold = (255, 235, 110)
+                border_outer = (70, 30, 12)
+                highlight_c = (255, 160, 70)
+            else:
+                top_c = (175, 78, 25)
+                bot_c = (120, 48, 16)
+                border_gold = (255, 215, 80)
+                border_outer = (60, 25, 10)
+                highlight_c = (235, 135, 55)
         elif is_hover:
             top_c = (86, 38, 22)
             bot_c = (60, 25, 13)
@@ -352,7 +428,9 @@ class HsoButton(tk.Canvas):
 
         if self.is_disabled:
             fg = "#6a4e3c"
-        elif self.gold_text or self.is_selected:
+        elif self.is_selected:
+            fg = "#ffffff"
+        elif self.gold_text:
             fg = "#fff0a0"
         else:
             fg = "#ede8df"
@@ -658,10 +736,15 @@ class HsoStudioApp:
         self.game_proc = None
         self.game_started_ns = None
         self.state_data = {}
+        self.cached_player = {}
+        self.pk_cooldown_end = 0.0
+        self.pk_timer_id = None
         self.last_farm_signature = None
         self.last_farm_mode = "off"
         self.last_farm_damage_results = 0
         self.pending_zone_change = None
+        self.last_map_id = None
+        self.farm_paused_by_safety = False
 
         self.btn_renderer = HsoButtonRenderer()
         self.logo_photo = None
@@ -840,7 +923,7 @@ class HsoStudioApp:
     # 3. LEFT SIDEBAR (LOCATION & MONSTERS/PLAYERS)
     # ==============================================================
     def build_left_sidebar(self):
-        left_container = tk.Frame(self.mid_area, bg=COLOR_BG_DARK, width=160)
+        left_container = tk.Frame(self.mid_area, bg=COLOR_BG_DARK, width=176)
         left_container.pack(side="left", fill="y", padx=(0, 3))
         left_container.pack_propagate(False)
 
@@ -900,11 +983,11 @@ class HsoStudioApp:
         self.p_mon.pack(fill="both", expand=True)
         c_mon = self.p_mon.body
 
-        list_container = tk.Frame(c_mon, bg=COLOR_INNER_BG)
-        list_container.pack(fill="both", expand=True)
+        self.list_container = tk.Frame(c_mon, bg=COLOR_INNER_BG)
+        self.list_container.pack(fill="both", expand=True)
 
-        self.canvas_mon = tk.Canvas(list_container, bg=COLOR_INNER_BG, highlightthickness=0)
-        self.mon_scrollbar = ttk.Scrollbar(list_container, orient="vertical", command=self.canvas_mon.yview)
+        self.canvas_mon = tk.Canvas(self.list_container, bg=COLOR_INNER_BG, highlightthickness=0)
+        self.mon_scrollbar = ttk.Scrollbar(self.list_container, orient="vertical", command=self.canvas_mon.yview)
 
         self.canvas_mon.configure(yscrollcommand=self.mon_scrollbar.set)
         self.canvas_mon.pack(side="left", fill="both", expand=True)
@@ -916,6 +999,7 @@ class HsoStudioApp:
         self.canvas_mon.bind("<Button-5>", lambda e: self.canvas_mon.yview_scroll(1, "units"))
         self.canvas_mon.bind("<Button-1>", self.pin_monster_from_panel)
         self.monster_rows = []
+        self.monster_grid_cells = []
 
     # ==============================================================
     # POPUP DIALOG CHỌN ĐỘ PHÂN GIẢI / TỰ NHẬP
@@ -1121,12 +1205,27 @@ class HsoStudioApp:
         self.btn_auto_pickup.set_selected(new_val)
         self.btn_auto_pickup.configure(gold_text=new_val)
         self.btn_auto_pickup.set_text(f"Auto Loot: {'ON' if new_val else 'OFF'}")
+        if hasattr(self, "btn_auto_loot_opt"):
+            self.btn_auto_loot_opt.set_selected(new_val)
+            self.btn_auto_loot_opt.configure(gold_text=new_val)
 
+        loot_filter = self.config.get("auto_loot_filter", DEFAULT_CONFIG["auto_loot_filter"])
+        cmd = {"action": "auto_pickup", "enabled": new_val}
+        cmd.update(loot_filter)
         try:
-            self.write_command({"action": "auto_pickup", "enabled": new_val})
+            self.write_command(cmd)
         except OSError as e:
             self.log_msg("Không gửi được lệnh Auto Loot: " + str(e))
         self.log_msg(f"Auto Loot: {'ON' if new_val else 'OFF'}")
+
+    def send_loot_filter_command(self):
+        loot_filter = self.config.get("auto_loot_filter", DEFAULT_CONFIG["auto_loot_filter"])
+        cmd = {"action": "loot_filter"}
+        cmd.update(loot_filter)
+        try:
+            self.write_command(cmd)
+        except OSError as e:
+            self.log_msg("Không gửi được lệnh bộ lọc nhặt đồ: " + str(e))
 
     # ==============================================================
     # ==============================================================
@@ -1165,26 +1264,36 @@ class HsoStudioApp:
         )
         self.btn_screen.pack(fill="x", pady=(0, 3))
 
+        # Hàng Auto Attack và Tùy chọn Auto Fam (⚙)
+        row_attack_farm = tk.Frame(c_func, bg="#1e1109")
+        row_attack_farm.pack(fill="x", pady=(0, 3))
+
+        # Nút icon Option Auto Fam ở bên trái
+        self.btn_auto_farm_opt = HsoButton(
+            row_attack_farm,
+            text="⚙",
+            font_size=10,
+            width=26,
+            height=23,
+            renderer=self.btn_renderer,
+            command=self.open_auto_farm_modal
+        )
+        self.btn_auto_farm_opt.pack(side="left", padx=(0, 2))
+        self.btn_auto_farm = self.btn_auto_farm_opt  # Alias tương thích
+
+        # Nút Auto Attack ở bên phải của hàng
         is_attack = self.config.get("auto_attack", False)
         self.btn_auto_attack = HsoButton(
-            c_func,
+            row_attack_farm,
             text=f"Auto Attack: {'ON' if is_attack else 'OFF'}",
             font_size=8,
-            width=96,
             height=23,
             is_selected=is_attack,
             gold_text=is_attack,
             renderer=self.btn_renderer,
             command=self.toggle_auto_attack
         )
-        self.btn_auto_attack.pack(fill="x", pady=(0, 3))
-
-        self.btn_auto_farm = HsoButton(
-            c_func, text="Auto Fam: Cấu hình", font_size=8,
-            width=96, height=23, renderer=self.btn_renderer,
-            command=self.open_auto_farm_modal
-        )
-        self.btn_auto_farm.pack(fill="x", pady=(0, 3))
+        self.btn_auto_attack.pack(side="left", fill="x", expand=True)
 
         self.btn_unpin = HsoButton(
             c_func, text="Bỏ ghim mục tiêu", font_size=8,
@@ -1193,14 +1302,6 @@ class HsoStudioApp:
         )
         self.btn_unpin.pack(fill="x", pady=(0, 3))
         self.btn_unpin.set_disabled(True)
-
-        self.btn_attack = HsoButton(
-            c_func, text="⚔️ Tấn công ngay", font_size=8,
-            width=96, height=23, renderer=self.btn_renderer,
-            command=self.attack_pinned_target
-        )
-        self.btn_attack.pack(fill="x", pady=(0, 3))
-        self.btn_attack.set_disabled(True)
 
         self.btn_pk = HsoButton(
             c_func, text="Đồ Sát: TẮT", font_size=8,
@@ -1252,19 +1353,35 @@ class HsoStudioApp:
 
         self.update_speed_ui()
 
+        # Hàng Auto Loot và Tùy chọn Lọc đồ (⚙)
+        row_loot = tk.Frame(c_func, bg="#1e1109")
+        row_loot.pack(fill="x", pady=0)
+
         is_pickup = self.config.get("auto_pickup", False)
+        self.btn_auto_loot_opt = HsoButton(
+            row_loot,
+            text="⚙",
+            font_size=10,
+            width=26,
+            height=23,
+            is_selected=is_pickup,
+            gold_text=is_pickup,
+            renderer=self.btn_renderer,
+            command=self.open_auto_loot_modal
+        )
+        self.btn_auto_loot_opt.pack(side="left", padx=(0, 2))
+
         self.btn_auto_pickup = HsoButton(
-            c_func,
+            row_loot,
             text=f"Auto Loot: {'ON' if is_pickup else 'OFF'}",
             font_size=8,
-            width=96,
             height=23,
             is_selected=is_pickup,
             gold_text=is_pickup,
             renderer=self.btn_renderer,
             command=self.toggle_auto_pickup
         )
-        self.btn_auto_pickup.pack(fill="x", pady=0)
+        self.btn_auto_pickup.pack(side="left", fill="x", expand=True)
 
     def redraw_player_bars(self):
         c = self.canvas_player_bars
@@ -1273,11 +1390,11 @@ class HsoStudioApp:
         if w < 10:
             w = 148
 
-        p = self.state_data.get("player", {})
+        p = self.state_data.get("player") or getattr(self, "cached_player", {}) or {}
         hp = max(0, p.get("hp", 0))
         max_hp = max(1, p.get("maxHp", 1))
         mp = max(0, p.get("mp", 0))
-        max_mp = max(1, p.get("maxmp", max(1, p.get("maxMp", 1))))
+        max_mp = max(1, p.get("maxMp") or p.get("maxmp", 1))
         exp_val = p.get("exp", 0)
 
         hp_pct = min(1.0, max(0.0, float(hp) / float(max_hp)))
@@ -1333,8 +1450,8 @@ class HsoStudioApp:
             cw = 136
 
         if self.active_mon_tab == 0:
-            for top, bottom, monster_id in getattr(self, "monster_rows", []):
-                if top <= y < bottom:
+            for x1, y1, x2, y2, monster_id in getattr(self, "monster_grid_cells", []):
+                if x1 <= x < x2 and y1 <= y < y2:
                     if monster_id == self.state_data.get("pinned_monster_id", -1):
                         self.unpin_target()
                         return
@@ -1398,16 +1515,50 @@ class HsoStudioApp:
         self.unpin_target()
 
     def toggle_pk(self):
+        if self.pk_cooldown_end and time.monotonic() < self.pk_cooldown_end:
+            remaining = int(math.ceil(self.pk_cooldown_end - time.monotonic()))
+            self.log_msg(f"⏳ Đồ Sát đang trong thời gian giãn cách ({remaining}s còn lại).")
+            return
         try:
             my_pk = self.state_data.get("player", {}).get("typePk", -1)
             new_pk = -1 if my_pk == 0 else 0
             self.write_command({"action": "set_pk", "type_pk": new_pk})
             if new_pk == 0:
-                self.log_msg("⚔️ Đang bật chế độ ĐỒ SÁT...")
+                self.log_msg("⚔️ Đang bật chế độ ĐỒ SÁT (giãn cách 3 phút)...")
             else:
-                self.log_msg("🕊️ Đang tắt Đồ Sát, chuyển về Hòa Bình...")
+                self.log_msg("🕊️ Đang tắt Đồ Sát, chuyển về Hòa Bình (giãn cách 3 phút)...")
+
+            # Khởi động đếm ngược 180s (3 phút) và vô hiệu hóa nút
+            self.pk_cooldown_end = time.monotonic() + 180.0
+            self.update_pk_countdown()
         except (OSError, KeyError) as e:
             self.log_msg("Không gửi lệnh đổi PK được: " + str(e))
+
+    def update_pk_countdown(self):
+        if not hasattr(self, "btn_pk"):
+            return
+        now = time.monotonic()
+        remaining = int(math.ceil(self.pk_cooldown_end - now))
+        if remaining > 0:
+            is_pk = (self.state_data.get("player", {}).get("typePk", -1) == 0)
+            status = "BẬT" if is_pk else "TẮT"
+            self.btn_pk.set_text(f"Đồ Sát: {status} ({remaining}s)")
+            self.btn_pk.set_disabled(True)
+            if self.pk_timer_id is not None:
+                try:
+                    self.root.after_cancel(self.pk_timer_id)
+                except Exception:
+                    pass
+            self.pk_timer_id = self.root.after(1000, self.update_pk_countdown)
+        else:
+            self.pk_cooldown_end = 0.0
+            self.pk_timer_id = None
+            is_pk = (self.state_data.get("player", {}).get("typePk", -1) == 0)
+            status = "BẬT" if is_pk else "TẮT"
+            self.btn_pk.set_text(f"Đồ Sát: {status}")
+            self.btn_pk.set_selected(is_pk)
+            self.btn_pk.configure(gold_text=is_pk)
+            self.btn_pk.set_disabled(False)
 
     def attack_player(self, player_id, player_name=""):
         try:
@@ -1446,28 +1597,277 @@ class HsoStudioApp:
             self.last_farm_signature = None
             return
         map_id, area = data.get("map_id", 0), data.get("area", 0)
-        profile = self.config.get("auto_farm", {}).get(farm_profile_key(map_id, area))
         other_count = data.get("other_players_count", len(data.get("players", [])))
-        if other_count > 0:
-            profile = None
-        ids = resolve_farm_ids(profile, data.get("map_monsters", data.get("monsters", [])),
+
+        saved_profile = get_map_farm_profile(self.config, map_id, area)
+        active_profile = saved_profile if other_count == 0 else None
+
+        ids = resolve_farm_ids(active_profile, data.get("map_monsters", data.get("monsters", [])),
                                include_dead=True)
-        if hasattr(self, "btn_auto_farm"):
-            self.btn_auto_farm.set_selected(profile is not None)
-            self.btn_auto_farm.set_text(f"Auto Fam: {len(ids)} quái" if profile is not None
-                                        else "Auto Fam: Cấu hình")
-        signature = (map_id, area, profile is not None, tuple(ids))
+        is_configured = (active_profile is not None and len(ids) > 0)
+        if hasattr(self, "btn_auto_farm_opt"):
+            self.btn_auto_farm_opt.set_selected(is_configured)
+            self.btn_auto_farm_opt.configure(gold_text=is_configured)
+        signature = (map_id, area, is_configured, tuple(ids if is_configured else ()))
         if not force and signature == self.last_farm_signature:
             return
         try:
             self.write_command({
                 "action": "farm_targets", "map_id": map_id, "area": area,
-                "configured": 1 if profile is not None else 0,
-                "ids": ";".join(str(monster_id) for monster_id in ids)
+                "configured": 1 if is_configured else 0,
+                "ids": ";".join(str(monster_id) for monster_id in ids) if is_configured else ""
             })
-            self.last_farm_signature = signature
         except OSError as e:
             self.log_msg("Không đồng bộ được Auto Fam: " + str(e))
+
+    def open_auto_loot_modal(self):
+        old_dialog = getattr(self, "auto_loot_dialog", None)
+        if old_dialog is not None and old_dialog.winfo_exists():
+            old_dialog.lift()
+            return
+
+        dlg = tk.Toplevel(self.root)
+        self.auto_loot_dialog = dlg
+        dlg.title("Cấu hình Auto Loot")
+        dlg.geometry("380x490")
+        dlg.minsize(360, 460)
+        dlg.configure(bg=COLOR_BG_DARK)
+        dlg.transient(self.root)
+        dlg.grab_set()
+
+        try:
+            x = self.root.winfo_x() + (self.root.winfo_width() - 380) // 2
+            y = self.root.winfo_y() + (self.root.winfo_height() - 490) // 2
+            dlg.geometry(f"+{max(10, x)}+{max(10, y)}")
+        except Exception:
+            pass
+
+        panel = HsoPanel(dlg, title="CẤU HÌNH AUTO LOOT - LỌC ĐỒ")
+        panel.pack(fill="both", expand=True, padx=4, pady=4)
+        body = panel.body
+
+        cur_filter = self.config.get("auto_loot_filter", {})
+        default_filter = DEFAULT_CONFIG["auto_loot_filter"]
+
+        filter_vars = {}
+        for k in default_filter:
+            filter_vars[k] = tk.BooleanVar(value=bool(cur_filter.get(k, default_filter[k])))
+
+        # Subtitle & status
+        sub_frame = tk.Frame(body, bg="#1e1109")
+        sub_frame.pack(fill="x", pady=(0, 4))
+
+        tk.Label(
+            sub_frame,
+            text="Chọn các loại vật phẩm được phép tự động nhặt:",
+            font=(FONT_FAMILY, 8),
+            fg=COLOR_TEXT_GOLD,
+            bg="#1e1109"
+        ).pack(anchor="w")
+
+        summary_var = tk.StringVar()
+        def update_summary():
+            count = sum(1 for v in filter_vars.values() if v.get())
+            summary_var.set(f"Đang chọn: {count}/{len(filter_vars)} loại")
+
+        tk.Label(
+            sub_frame,
+            textvariable=summary_var,
+            font=(FONT_FAMILY, 7),
+            fg=COLOR_TEXT_MUTED,
+            bg="#1e1109"
+        ).pack(anchor="w")
+
+        # Quick select toolbar
+        quick_bar = tk.Frame(body, bg="#1e1109")
+        quick_bar.pack(fill="x", pady=(0, 6))
+
+        def set_all_loot(val):
+            for v in filter_vars.values():
+                v.set(val)
+            update_summary()
+
+        btn_select_all = HsoButton(
+            quick_bar,
+            text="Chọn tất cả",
+            font_size=7,
+            width=80,
+            height=20,
+            renderer=self.btn_renderer,
+            command=lambda: set_all_loot(True)
+        )
+        btn_select_all.pack(side="left", padx=(0, 4))
+
+        btn_deselect_all = HsoButton(
+            quick_bar,
+            text="Bỏ chọn hết",
+            font_size=7,
+            width=80,
+            height=20,
+            renderer=self.btn_renderer,
+            command=lambda: set_all_loot(False)
+        )
+        btn_deselect_all.pack(side="left")
+
+        # Container box
+        content_box = tk.Frame(body, bg=COLOR_INNER_BG, bd=1, relief="solid")
+        content_box.pack(fill="both", expand=True, pady=(0, 6))
+
+        # --- SECTION 1: TRANG BỊ ---
+        lbl_sec1 = tk.Label(
+            content_box,
+            text="  ⚔ TRANG BỊ THEO PHẨM CẤP / MÀU  ",
+            font=(FONT_FAMILY, 8, "bold"),
+            fg=COLOR_TEXT_GOLD,
+            bg="#2a160d"
+        )
+        lbl_sec1.pack(fill="x", pady=(2, 2))
+
+        f_equip = tk.Frame(content_box, bg=COLOR_INNER_BG)
+        f_equip.pack(fill="x", padx=8, pady=2)
+
+        equip_items = [
+            ("white", "⚪ Đồ Trắng (Thường)", "#ede8df"),
+            ("blue", "🔵 Đồ Xanh (Đặc biệt)", "#5dade2"),
+            ("yellow", "🟡 Đồ Vàng (Hiếm)", "#f4d03f"),
+            ("purple", "🟣 Đồ Tím (Huyền bí)", "#bb8fce"),
+            ("orange", "🟠 Đồ Cam (Sử thi)", "#eb984e"),
+            ("green", "🟢 Đồ Xanh lá (Hoàn mỹ)", "#58d68d"),
+        ]
+        for idx, (key, text, col) in enumerate(equip_items):
+            r = idx // 2
+            c = idx % 2
+            cb = tk.Checkbutton(
+                f_equip,
+                text=text,
+                variable=filter_vars[key],
+                command=update_summary,
+                font=(FONT_FAMILY, 8),
+                bg=COLOR_INNER_BG,
+                fg=col,
+                selectcolor="#2a160d",
+                activebackground=COLOR_INNER_BG,
+                activeforeground=col,
+                bd=0,
+                highlightthickness=0
+            )
+            cb.grid(row=r, column=c, sticky="w", padx=4, pady=2)
+        f_equip.grid_columnconfigure(0, weight=1)
+        f_equip.grid_columnconfigure(1, weight=1)
+
+        # --- SECTION 2: HỒI PHỤC & TIỀN TỆ ---
+        lbl_sec2 = tk.Label(
+            content_box,
+            text="  🧪 HỒI PHỤC & TIỀN TỆ  ",
+            font=(FONT_FAMILY, 8, "bold"),
+            fg=COLOR_TEXT_GOLD,
+            bg="#2a160d"
+        )
+        lbl_sec2.pack(fill="x", pady=(6, 2))
+
+        f_potions = tk.Frame(content_box, bg=COLOR_INNER_BG)
+        f_potions.pack(fill="x", padx=8, pady=2)
+
+        potion_items = [
+            ("hp", "🩸 Bình Máu (HP)", "#ff6b6b"),
+            ("mp", "💧 Bình Mana (MP)", "#5dade2"),
+            ("gold", "💰 Tiền Vàng (Xu)", "#f5b041"),
+        ]
+        for idx, (key, text, col) in enumerate(potion_items):
+            cb = tk.Checkbutton(
+                f_potions,
+                text=text,
+                variable=filter_vars[key],
+                command=update_summary,
+                font=(FONT_FAMILY, 8),
+                bg=COLOR_INNER_BG,
+                fg=col,
+                selectcolor="#2a160d",
+                activebackground=COLOR_INNER_BG,
+                activeforeground=col,
+                bd=0,
+                highlightthickness=0
+            )
+            cb.grid(row=0, column=idx, sticky="w", padx=2, pady=2)
+        for i in range(3):
+            f_potions.grid_columnconfigure(i, weight=1)
+
+        # --- SECTION 3: NGUYÊN LIỆU & NHIỆM VỤ ---
+        lbl_sec3 = tk.Label(
+            content_box,
+            text="  📦 NGUYÊN LIỆU & KHÁC  ",
+            font=(FONT_FAMILY, 8, "bold"),
+            fg=COLOR_TEXT_GOLD,
+            bg="#2a160d"
+        )
+        lbl_sec3.pack(fill="x", pady=(6, 2))
+
+        f_misc = tk.Frame(content_box, bg=COLOR_INNER_BG)
+        f_misc.pack(fill="x", padx=8, pady=2)
+
+        misc_items = [
+            ("material", "💎 Nguyên liệu & Đá", "#a569bd"),
+            ("quest", "📜 Vật phẩm Nhiệm vụ", "#e59866"),
+        ]
+        for idx, (key, text, col) in enumerate(misc_items):
+            cb = tk.Checkbutton(
+                f_misc,
+                text=text,
+                variable=filter_vars[key],
+                command=update_summary,
+                font=(FONT_FAMILY, 8),
+                bg=COLOR_INNER_BG,
+                fg=col,
+                selectcolor="#2a160d",
+                activebackground=COLOR_INNER_BG,
+                activeforeground=col,
+                bd=0,
+                highlightthickness=0
+            )
+            cb.grid(row=0, column=idx, sticky="w", padx=4, pady=2)
+        f_misc.grid_columnconfigure(0, weight=1)
+        f_misc.grid_columnconfigure(1, weight=1)
+
+        update_summary()
+
+        # Bottom buttons: Hủy & Lưu
+        bottom_bar = tk.Frame(body, bg="#1e1109")
+        bottom_bar.pack(side="bottom", fill="x", pady=(4, 0))
+
+        def on_cancel():
+            dlg.destroy()
+
+        def on_save():
+            new_filter = {k: bool(v.get()) for k, v in filter_vars.items()}
+            self.config["auto_loot_filter"] = new_filter
+            save_config(self.config)
+            self.send_loot_filter_command()
+            self.log_msg("Đã lưu cấu hình bộ lọc Auto Loot!")
+            dlg.destroy()
+
+        btn_cancel = HsoButton(
+            bottom_bar,
+            text="Hủy",
+            font_size=8,
+            width=70,
+            height=24,
+            renderer=self.btn_renderer,
+            command=on_cancel
+        )
+        btn_cancel.pack(side="left")
+
+        btn_save = HsoButton(
+            bottom_bar,
+            text="LƯU CẤU HÌNH",
+            font_size=8,
+            width=110,
+            height=24,
+            is_selected=True,
+            gold_text=True,
+            renderer=self.btn_renderer,
+            command=on_save
+        )
+        btn_save.pack(side="right")
 
     def open_auto_farm_modal(self):
         data = self.state_data
@@ -1481,7 +1881,7 @@ class HsoStudioApp:
 
         map_id, area = data["map_id"], data["area"]
         profile_key = farm_profile_key(map_id, area)
-        profile = self.config.get("auto_farm", {}).get(profile_key)
+        profile = get_map_farm_profile(self.config, map_id, area)
         try:
             self.write_command({"action": "scan_monsters"})
         except OSError as e:
@@ -1742,16 +2142,29 @@ class HsoStudioApp:
         def do_save(new_profile, chosen):
             farm_profiles = self.config.setdefault("auto_farm", {})
             previous_profile = farm_profiles.get(profile_key)
-            farm_profiles[profile_key] = new_profile
+            if not chosen or new_profile is None:
+                farm_profiles.pop(profile_key, None)
+                farm_profiles.pop(f"{int(map_id)}:*", None)
+                farm_profiles.pop(str(int(map_id)), None)
+            else:
+                farm_profiles[profile_key] = new_profile
+                farm_profiles[f"{int(map_id)}:*"] = new_profile
+                farm_profiles[str(int(map_id))] = new_profile
             if not save_config(self.config):
                 if previous_profile is None:
-                    del farm_profiles[profile_key]
+                    farm_profiles.pop(profile_key, None)
+                    farm_profiles.pop(f"{int(map_id)}:*", None)
+                    farm_profiles.pop(str(int(map_id)), None)
                 else:
                     farm_profiles[profile_key] = previous_profile
                 messagebox.showerror("Auto Fam", "Không lưu được cấu hình Auto Fam.", parent=dlg)
                 return
+            self.farm_paused_by_safety = False
             self.sync_farm_targets(force=True)
-            self.log_msg(f"Đã lưu Auto Fam: {len(chosen)} quái ở map {map_id}, khu {area + 1}.")
+            if chosen and new_profile is not None:
+                self.log_msg(f"Đã lưu Auto Fam: {len(chosen)} quái cho map {map_id}.")
+            else:
+                self.log_msg(f"Đã tắt Auto Fam ở map {map_id} (chọn 0 quái).")
             close_dialog()
 
         HsoButton(bottom, text="Tất cả", font_size=7, width=58, height=20,
@@ -1768,7 +2181,8 @@ class HsoStudioApp:
 
     def refresh_mon_panel(self):
         if getattr(self, "active_mon_tab", 0) == 0:
-            self.render_monster_hp_bars(self.state_data.get("monsters", []))
+            monsters = self.state_data.get("map_monsters") or self.state_data.get("monsters", [])
+            self.render_monster_grid(monsters)
         else:
             self.render_players_list(self.state_data.get("players", []))
 
@@ -1960,7 +2374,14 @@ class HsoStudioApp:
                 c.create_rectangle(bx1 + 1, by + 1, bx1 + 1 + fill_w, by + bh - 1, fill=COLOR_HP_RED, outline="")
                 c.create_rectangle(bx1 + 1, by + 1, bx1 + 1 + fill_w, by + 2, fill="#ff7a7a", outline="")
 
-            hp_str = f"{hp}/{max_hp}"
+            death_time = m.get("death_time", 0)
+            respawn_ms = m.get("respawn_ms", 5000)
+            now_ms = time.time() * 1000
+            rem = max(0.0, (death_time + respawn_ms - now_ms) / 1000.0) if death_time > 0 else 0.0
+            if hp <= 0 and death_time > 0 and rem > 0:
+                hp_str = f"HS {rem:.1f}s"
+            else:
+                hp_str = f"{hp}/{max_hp}"
             mid_x = bx1 + bar_w // 2
             c.create_text(mid_x, mid_y, text=hp_str, fill="#ffffff", font=(FONT_FAMILY, 7), anchor="center")
 
@@ -1968,6 +2389,141 @@ class HsoStudioApp:
             y_offset += item_h + pad_y
 
         c.configure(scrollregion=(0, 0, cw, y_offset + 4))
+
+    def render_monster_grid(self, monsters):
+        c = self.canvas_mon
+        c.delete("all")
+        self.monster_grid_cells = []
+
+        cw = c.winfo_width()
+        if cw < 30:
+            cw = 152
+
+        if not monsters:
+            c.create_text(
+                cw // 2, 30,
+                text="Chưa có dữ liệu quái...",
+                fill=COLOR_TEXT_MUTED,
+                font=(FONT_FAMILY, 7),
+                justify="center",
+                anchor="center"
+            )
+            c.configure(scrollregion=(0, 0, cw, 60))
+            return
+
+        pad_x = 2
+        gap_x = 2
+        col_w = max(68, (cw - pad_x * 2 - gap_x) // 2)
+        cell_h = 12
+        pad_y = 1
+        bar_w = 34
+        bar_h = 8
+        y_offset = 1
+
+        focus_id = self.state_data.get("focus_monster_id", -1)
+        pinned_id = self.state_data.get("pinned_monster_id", -1)
+        data = self.state_data
+        profile = get_map_farm_profile(self.config, data.get("map_id", 0), data.get("area", 0))
+
+        # Sắp xếp theo ID tăng dần để vị trí các quái cố định, dễ quan sát khi autofam
+        seen = set()
+        unique_monsters = []
+        for m in sorted(monsters, key=lambda x: x.get("id", 0)):
+            m_id = m.get("id", 0)
+            if m_id not in seen:
+                seen.add(m_id)
+                unique_monsters.append(m)
+        monsters = unique_monsters
+
+        now_ms = time.time() * 1000
+
+        for idx, m in enumerate(monsters):
+            m_id = m.get("id", 0)
+            m_name = m.get("name", "Mob")
+            hp = max(0, m.get("hp", 0))
+            max_hp = max(1, m.get("maxHp", 1))
+            pct = min(1.0, max(0.0, float(hp) / float(max_hp)))
+            is_dead = (hp <= 0)
+
+            col = idx % 2
+            row = idx // 2
+            cell_x1 = pad_x if col == 0 else (pad_x + col_w + gap_x)
+            cell_x2 = cell_x1 + col_w
+            cell_y1 = y_offset + row * (cell_h + pad_y)
+            cell_y2 = cell_y1 + cell_h
+            mid_y = (cell_y1 + cell_y2) // 2
+
+            is_pinned = (m_id == pinned_id)
+            is_focused = (m_id == focus_id)
+            selected = farm_profile_matches(profile, m)
+
+            # Nền ô
+            if is_pinned:
+                c.create_rectangle(cell_x1, cell_y1, cell_x2, cell_y2, fill="#4a280e", outline="#ffd700", width=1)
+            elif is_focused:
+                c.create_rectangle(cell_x1, cell_y1, cell_x2, cell_y2, fill="#281b10", outline="#59d8ff", width=1)
+            elif is_dead:
+                c.create_rectangle(cell_x1, cell_y1, cell_x2, cell_y2, fill="#121212", outline="#222222", width=1)
+            elif selected:
+                c.create_rectangle(cell_x1, cell_y1, cell_x2, cell_y2, fill="#1c0e07", outline="#4a2c14", width=1)
+            else:
+                c.create_rectangle(cell_x1, cell_y1, cell_x2, cell_y2, fill="#160c06", outline="#2a1408", width=1)
+
+            # Tên quái siêu ngắn gọn
+            short_name = compact_mob_name(m_name)
+            txt_name = f"#{m_id} {short_name}"
+            if len(txt_name) > 8:
+                txt_name = txt_name[:8]
+
+            if is_pinned:
+                name_color = "#ffd700"
+            elif is_focused:
+                name_color = "#9ee9ff"
+            elif is_dead:
+                name_color = "#555555"
+            else:
+                name_color = "#e8d5b5"
+
+            c.create_text(
+                cell_x1 + 3, mid_y,
+                text=txt_name,
+                fill=name_color,
+                font=(FONT_FAMILY, 7),
+                anchor="w"
+            )
+
+            # Thanh máu mini
+            bx1 = cell_x2 - bar_w - 2
+            bx2 = cell_x2 - 2
+            by1 = mid_y - bar_h // 2
+            by2 = by1 + bar_h
+
+            if is_dead:
+                c.create_rectangle(bx1, by1, bx2, by2, fill="#1e1e1e", outline="#333333")
+                death_time = m.get("death_time", 0)
+                respawn_ms = m.get("respawn_ms", 5000)
+                rem = max(0.0, (death_time + respawn_ms - now_ms) / 1000.0) if death_time > 0 else 0.0
+                if death_time > 0 and rem > 0:
+                    hp_txt = f"{rem:.1f}s"
+                    txt_fg = "#ffe36e" if rem <= 0.6 else "#bfa15f"
+                else:
+                    hp_txt = "0"
+                    txt_fg = "#777777"
+                c.create_text((bx1 + bx2) // 2, mid_y, text=hp_txt, fill=txt_fg, font=(FONT_FAMILY, 6, "bold"), anchor="center")
+            else:
+                c.create_rectangle(bx1, by1, bx2, by2, fill="#1c0b05", outline="#4a2211")
+                fill_w = int((bar_w - 2) * pct)
+                if fill_w > 0:
+                    c.create_rectangle(bx1 + 1, by1 + 1, bx1 + 1 + fill_w, by2 - 1, fill=COLOR_HP_RED, outline="")
+                    c.create_rectangle(bx1 + 1, by1 + 1, bx1 + 1 + fill_w, by1 + 2, fill="#ff7a7a", outline="")
+                hp_txt = format_mini_hp(hp)
+                c.create_text((bx1 + bx2) // 2, mid_y, text=hp_txt, fill="#ffffff", font=(FONT_FAMILY, 6), anchor="center")
+
+            self.monster_grid_cells.append((cell_x1, cell_y1, cell_x2, cell_y2, m_id))
+
+        total_rows = (len(monsters) + 1) // 2
+        total_h = y_offset + total_rows * (cell_h + pad_y) + 4
+        c.configure(scrollregion=(0, 0, cw, max(total_h, 60)))
 
     # ==============================================================
     # 5. CENTER CONTENT (RADAR & LOGS)
@@ -1983,7 +2539,7 @@ class HsoStudioApp:
 
         self.txt_log = tk.Text(
             c_log,
-            height=3,
+            height=4,
             width=20,
             bg=COLOR_INNER_BG,
             fg=COLOR_TEXT_WHITE,
@@ -2370,18 +2926,32 @@ class HsoStudioApp:
         self.last_farm_signature = None
         self.last_farm_mode = "off"
         self.last_farm_damage_results = 0
+        self.last_map_id = None
+        self.farm_paused_by_safety = False
         self.config["auto_attack"] = False
+        self.cached_player = {}
+        if hasattr(self, "pk_timer_id") and self.pk_timer_id is not None:
+            try:
+                self.root.after_cancel(self.pk_timer_id)
+            except Exception:
+                pass
+            self.pk_timer_id = None
+        self.pk_cooldown_end = 0.0
+
         self.btn_auto_attack.set_selected(False)
         self.btn_auto_attack.configure(gold_text=False)
         self.btn_auto_attack.set_text("Auto Attack: OFF")
         self.lbl_in_game_status.configure(text="Waiting for game", fg=COLOR_TEXT_MUTED)
         self.lbl_char_name.configure(text="Offline")
         self.lbl_char_lv.configure(text="")
+        self.lbl_hp_val.configure(text="--/--")
+        self.lbl_mp_val.configure(text="--/--")
         self.lbl_map_name.configure(text="--")
         self.lbl_zone_val.configure(text="Zone: --")
         self.btn_zone_select.set_text("--")
-        self.btn_auto_farm.set_text("Auto Fam: Cấu hình")
-        self.btn_auto_farm.set_selected(False)
+        if hasattr(self, "btn_auto_farm_opt"):
+            self.btn_auto_farm_opt.set_selected(False)
+            self.btn_auto_farm_opt.configure(gold_text=False)
         self.btn_unpin.set_disabled(True)
         self.last_logged_pin_player = -1
         self.last_logged_pin_monster = -1
@@ -2389,6 +2959,7 @@ class HsoStudioApp:
             self.btn_pk.set_text("Đồ Sát: TẮT")
             self.btn_pk.set_selected(False)
             self.btn_pk.configure(gold_text=False)
+            self.btn_pk.set_disabled(False)
         self.p_char.set_title("Offline")
         self.p_mon.set_tab_title(1, "PLAYER (0)")
         self.redraw_player_bars()
@@ -2439,26 +3010,23 @@ class HsoStudioApp:
         current_pin_pl = data.get("pinned_player_id", -1)
         has_pin = (current_pin >= 0 or current_pin_pl != -1)
         self.btn_unpin.set_disabled(not has_pin)
-        if hasattr(self, "btn_attack"):
-            self.btn_attack.set_disabled(not has_pin)
-        if current_pin_pl != -1:
-            pinned_name = next((p.get("name") for p in data.get("players", []) if p.get("id") == current_pin_pl), f"ID {current_pin_pl}")
-            self.btn_unpin.set_text(f"Bỏ ghim ({pinned_name[:8]})")
-        elif current_pin >= 0:
-            self.btn_unpin.set_text(f"Bỏ ghim ({current_pin})")
-        else:
-            self.btn_unpin.set_text("Bỏ ghim mục tiêu")
-
         my_pk = data.get("player", {}).get("typePk", -1)
         if hasattr(self, "btn_pk"):
-            if my_pk == 0:
-                self.btn_pk.set_text("Đồ Sát: BẬT")
-                self.btn_pk.set_selected(True)
-                self.btn_pk.configure(gold_text=True)
+            is_pk = (my_pk == 0)
+            if self.pk_cooldown_end and time.monotonic() < self.pk_cooldown_end:
+                # Đang trong thời gian đếm ngược 180s: giữ nguyên đếm ngược và disabled
+                self.btn_pk.set_selected(is_pk)
+                self.btn_pk.configure(gold_text=is_pk)
             else:
-                self.btn_pk.set_text("Đồ Sát: TẮT")
-                self.btn_pk.set_selected(False)
-                self.btn_pk.configure(gold_text=False)
+                if is_pk:
+                    self.btn_pk.set_text("Đồ Sát: BẬT")
+                    self.btn_pk.set_selected(True)
+                    self.btn_pk.configure(gold_text=True)
+                else:
+                    self.btn_pk.set_text("Đồ Sát: TẮT")
+                    self.btn_pk.set_selected(False)
+                    self.btn_pk.configure(gold_text=False)
+                self.btn_pk.set_disabled(False)
 
         if in_game:
             last_m = getattr(self, "last_logged_pin_monster", -1)
@@ -2494,40 +3062,81 @@ class HsoStudioApp:
         if in_game:
             map_id = data.get("map_id", 0)
             area = data.get("area", 0)
-            pkey = farm_profile_key(map_id, area)
-            had_farm_profile = pkey in self.config.get("auto_farm", {})
+            saved_profile = get_map_farm_profile(self.config, map_id, area)
+            map_changed = (self.last_map_id is not None and self.last_map_id != map_id)
+            prev_map_id = self.last_map_id
+            self.last_map_id = map_id
 
-            # NẾU CÓ NGƯỜI CHƠI KHÁC VÀO KHU: NGAY LẬP TỨC TẮT AUTO FAM 1-HIT, CHỈ ĐỂ AUTO ATK ĐÁNH THƯỜNG
-            if other_count > 0 and had_farm_profile:
-                del self.config["auto_farm"][pkey]
-                save_config(self.config)
-                self.last_farm_signature = None
+            # TRƯỜNG HỢP 1: Chuyển sang map khác (hoặc quay lại map đã cấu hình fam)
+            if map_changed:
+                if saved_profile is None:
+                    # Ra map khác chưa có cấu hình fam -> Tắt fam trên map mới
+                    self.farm_paused_by_safety = False
+                    self.log_msg(f"Đã sang map #{map_id}: Chưa cấu hình Auto Fam cho map này (tạm tắt fam).")
+                else:
+                    # Vào lại map đã có cấu hình fam!
+                    if other_count == 0:
+                        # An toàn (0 người) -> Tự động bật lại Auto Fam & Auto Attack!
+                        if not self.config.get("auto_attack", False):
+                            self.config["auto_attack"] = True
+                            save_config(self.config)
+                            try:
+                                self.write_command({"action": "auto_attack", "enabled": True})
+                            except OSError:
+                                pass
+                            self.btn_auto_attack.set_selected(True)
+                            self.btn_auto_attack.configure(gold_text=True)
+                            self.btn_auto_attack.set_text("Auto Attack: ON")
+                        self.farm_paused_by_safety = False
+                        self.log_msg(f"✅ Trở lại map #{map_id} (0 người): Tự động kích hoạt lại Auto Fam & Auto Attack!")
+                    else:
+                        # Có người -> Vẫn lưu cấu hình fam nhưng TẮT fam, TẮT luôn Auto Attack!
+                        if self.config.get("auto_attack", False):
+                            self.config["auto_attack"] = False
+                            save_config(self.config)
+                            try:
+                                self.write_command({"action": "auto_attack", "enabled": False})
+                            except OSError:
+                                pass
+                            self.btn_auto_attack.set_selected(False)
+                            self.btn_auto_attack.configure(gold_text=False)
+                            self.btn_auto_attack.set_text("Auto Attack: OFF")
+                        self.farm_paused_by_safety = True
+                        p_names = ", ".join([p.get("name", "Người lạ") for p in players[:3]])
+                        self.log_msg(f"🚨 [AN TOÀN] Trở lại map #{map_id} nhưng có {other_count} người ({p_names}): TẮT Auto Fam & TẮT Auto Attack (vẫn giữ cấu hình fam).")
 
-                try:
-                    self.write_command({
-                        "action": "farm_targets", "map_id": map_id, "area": area,
-                        "configured": 0, "ids": ""
-                    })
-                except OSError:
-                    pass
+            # TRƯỜNG HỢP 2: Đang ở trong map có cấu hình farm, trạng thái an toàn / người chơi thay đổi
+            elif saved_profile is not None:
+                if other_count > 0 and not self.farm_paused_by_safety:
+                    # Có người chơi bước vào khu -> Tắt fam, tắt luôn auto atk (vẫn giữ cấu hình)
+                    self.farm_paused_by_safety = True
+                    if self.config.get("auto_attack", False):
+                        self.config["auto_attack"] = False
+                        save_config(self.config)
+                        try:
+                            self.write_command({"action": "auto_attack", "enabled": False})
+                        except OSError:
+                            pass
+                        self.btn_auto_attack.set_selected(False)
+                        self.btn_auto_attack.configure(gold_text=False)
+                        self.btn_auto_attack.set_text("Auto Attack: OFF")
+                    p_names = ", ".join([p.get("name", "Người lạ") for p in players[:3]])
+                    self.log_msg(f"🚨 [AN TOÀN] Có {other_count} người ({p_names}) vào khu! ĐÃ TẮT Auto Fam & TẮT Auto Attack để bảo vệ nick (cấu hình fam vẫn lưu).")
 
-                # Duy trì Auto Attack đánh thường từng con
-                if not self.config.get("auto_attack", False):
-                    self.config["auto_attack"] = True
-                    save_config(self.config)
-                    try:
-                        self.write_command({"action": "auto_attack", "enabled": True})
-                    except OSError:
-                        pass
-                self.btn_auto_attack.set_selected(True)
-                self.btn_auto_attack.configure(gold_text=True)
-                self.btn_auto_attack.set_text("Auto Attack: ON")
-
-                self.btn_auto_farm.set_selected(False)
-                self.btn_auto_farm.set_text("Auto Fam: Đã ngắt")
-
-                p_names = ", ".join([p.get("name", "Người lạ") for p in players[:3]])
-                self.log_msg(f"🚨 [AN TOÀN] Có {other_count} người ({p_names}) vào khu! ĐÃ LẬP TỨC TẮT AUTO FAM 1-HIT, chuyển về đánh thường từng con.")
+                elif other_count == 0 and self.farm_paused_by_safety:
+                    # Người chơi đã rời đi, khu trở lại an toàn -> Bật lại fam & auto atk
+                    self.farm_paused_by_safety = False
+                    if not self.config.get("auto_attack", False):
+                        self.config["auto_attack"] = True
+                        save_config(self.config)
+                        try:
+                            self.write_command({"action": "auto_attack", "enabled": True})
+                        except OSError:
+                            pass
+                        self.btn_auto_attack.set_selected(True)
+                        self.btn_auto_attack.configure(gold_text=True)
+                        self.btn_auto_attack.set_text("Auto Attack: ON")
+                    self.log_msg("✅ [AN TOÀN] Khu vực an toàn (0 người). Tự động bật lại Auto Fam & Auto Attack!")
 
             self.sync_farm_targets(data)
             farm_mode = data.get("farm_mode", "off")
@@ -2535,21 +3144,37 @@ class HsoStudioApp:
                 self.log_msg("Auto Fam: chỉ gửi đánh thường (skill 0) tới các quái đã chọn.")
             self.last_farm_mode = farm_mode
             farm_damage_results = data.get("farm_damage_results", 0)
-            if farm_damage_results > 0 and self.last_farm_damage_results == 0:
-                self.log_msg(f"Auto Fam: đã nhận sát thương từ server "
-                             f"({farm_damage_results} lượt, {data.get('farm_distinct_hits', 0)} quái).")
-            self.last_farm_damage_results = farm_damage_results
+            if farm_damage_results > self.last_farm_damage_results:
+                hits = data.get('farm_distinct_hits', 0)
+                self.log_msg(f"Auto Fam: 1-hit đã đánh trúng {hits} quái ({farm_damage_results} lượt ST). Đón đầu nhịp hồi sinh.")
+                self.last_farm_damage_results = farm_damage_results
+            elif farm_damage_results == 0:
+                self.last_farm_damage_results = 0
             if self.auto_farm_refresh is not None:
                 self.auto_farm_refresh(data)
             self.lbl_in_game_status.configure(text="IN GAME", fg=COLOR_ONLINE)
 
-            p = data.get("player", {})
+            p = data.get("player")
+            if p and p.get("name") and p.get("name") != "unname":
+                self.cached_player = dict(p)
+            elif getattr(self, "cached_player", None):
+                p = self.cached_player
+                data["player"] = p
+            else:
+                p = p or {}
+
             p_name = p.get('name', '--')
             p_lv = p.get('lv', '--')
             self.lbl_char_name.configure(text=p_name)
             self.lbl_char_lv.configure(text=f"(cấp {p_lv})" if p_lv != '--' else "")
-            self.lbl_hp_val.configure(text=f"{p.get('hp', 0)}/{p.get('maxHp', 0)}")
-            self.lbl_mp_val.configure(text=f"{p.get('mp', 0)}/{p.get('maxMp', 0)}")
+
+            p_hp = p.get('hp', 0)
+            p_max_hp = p.get('maxHp', 0)
+            p_mp = p.get('mp', 0)
+            p_max_mp = p.get('maxMp') or p.get('maxmp', 0)
+
+            self.lbl_hp_val.configure(text=f"{p_hp}/{p_max_hp}")
+            self.lbl_mp_val.configure(text=f"{p_mp}/{p_max_mp}")
 
             if hasattr(self, "p_char"):
                 p_title = f"{p_name} ({p_lv})" if (p_lv != '--' and p_lv != '') else p_name
@@ -2575,6 +3200,17 @@ class HsoStudioApp:
                     self.btn_auto_attack.configure(gold_text=is_atk)
                     self.btn_auto_attack.set_text(f"Auto Attack: {'ON' if is_atk else 'OFF'}")
 
+            if "auto_pickup" in data and hasattr(self, "btn_auto_pickup"):
+                is_pkp = bool(data["auto_pickup"])
+                if is_pkp != self.config.get("auto_pickup", False):
+                    self.config["auto_pickup"] = is_pkp
+                    self.btn_auto_pickup.set_selected(is_pkp)
+                    self.btn_auto_pickup.configure(gold_text=is_pkp)
+                    self.btn_auto_pickup.set_text(f"Auto Loot: {'ON' if is_pkp else 'OFF'}")
+                    if hasattr(self, "btn_auto_loot_opt"):
+                        self.btn_auto_loot_opt.set_selected(is_pkp)
+                        self.btn_auto_loot_opt.configure(gold_text=is_pkp)
+
             if "speed" in data and hasattr(self, "update_speed_ui"):
                 try:
                     live_spd = f"{float(data['speed']):.1f}"
@@ -2586,6 +3222,8 @@ class HsoStudioApp:
 
             p_count = data.get("players_count", len(players))
             if hasattr(self, "p_mon"):
+                m_all = data.get("map_monsters") or data.get("monsters", [])
+                self.p_mon.set_tab_title(0, f"MONSTERS ({len(m_all)})")
                 self.p_mon.set_tab_title(1, f"PLAYER ({p_count})")
 
             self.refresh_mon_panel()
@@ -2594,6 +3232,8 @@ class HsoStudioApp:
             self.lbl_in_game_status.configure(text="Login Screen", fg=COLOR_TEXT_MUTED)
             self.lbl_char_name.configure(text="Offline")
             self.lbl_char_lv.configure(text="")
+            self.lbl_hp_val.configure(text="--/--")
+            self.lbl_mp_val.configure(text="--/--")
             if hasattr(self, "p_char"):
                 self.p_char.set_title("Offline")
             if hasattr(self, "redraw_player_bars"):
@@ -2659,30 +3299,29 @@ class HsoStudioApp:
         c.create_line(ox, (oy + bottom) / 2, right, (oy + bottom) / 2,
                       fill=COLOR_BORDER_DARK, dash=(2, 4))
 
-        profile = self.config.get("auto_farm", {}).get(
-            farm_profile_key(data.get("map_id", 0), data.get("area", 0)))
+        profile = get_map_farm_profile(self.config, data.get("map_id", 0), data.get("area", 0))
         pinned_id = data.get("pinned_monster_id", -1)
         focus_id = data.get("focus_monster_id", -1)
+        now_ms = time.time() * 1000
         for monster in monsters:
             x, y = position(monster)
             hp = monster.get("hp", 0)
             is_dead = (hp <= 0)
-            selected = farm_profile_matches(profile, monster)
             focused = monster.get("id") in (pinned_id, focus_id)
             if is_dead:
-                color = "#555555"
-                radius = 2
+                # Quái chết: màu xám
+                c.create_oval(x - 2, y - 2, x + 2, y + 2,
+                              fill="#555555", outline="")
             elif focused:
-                color = COLOR_BORDER_LIGHT
-                radius = 3
-            elif selected:
-                color = COLOR_TEXT_GOLD
-                radius = 2
+                # Quái đang ghim hoặc focus: chấm đỏ với viền trắng tròn bao quanh nổi bật (không tô vàng)
+                c.create_oval(x - 4, y - 4, x + 4, y + 4,
+                              outline="#ffffff", width=1.5)
+                c.create_oval(x - 2, y - 2, x + 2, y + 2,
+                              fill=COLOR_HP_RED, outline="")
             else:
-                color = COLOR_HP_RED
-                radius = 2
-            c.create_oval(x - radius, y - radius, x + radius, y + radius,
-                          fill=color, outline="")
+                # Quái sống: luôn là màu đỏ thuần
+                c.create_oval(x - 2, y - 2, x + 2, y + 2,
+                              fill=COLOR_HP_RED, outline="")
 
         for waypoint in data.get("waypoints", []):
             x, y = position(waypoint)
@@ -2713,17 +3352,23 @@ class HsoStudioApp:
         px, py = position(player)
         c.create_oval(px - 4, py - 4, px + 4, py + 4,
                       fill=COLOR_ONLINE, outline="#ffffff", width=1)
-        legend_y = min(h - 23, bottom + 3)
-        for x, y, label, color in (
-                (8, legend_y, "● Quái", COLOR_HP_RED),
-                (55, legend_y, "● Chết", "#555555"),
-                (105, legend_y, "◆ Lối đi", "#b58cff"),
-                (170, legend_y, "▲ Khu", "#ff9b45"),
-                (8, legend_y + 11, "◆ Đá dịch chuyển", "#60dfff"),
-                (95, legend_y + 11, "● Người chơi", "#ffd700"),
-                (170, legend_y + 11, "● Bạn", COLOR_ONLINE)):
-            c.create_text(x, y, text=label, fill=color,
-                          font=(FONT_FAMILY, 7), anchor="nw")
+        legend_items = [
+            ("● Quái", COLOR_HP_RED),
+            ("● Chết", "#666666"),
+            ("◆ Cổng", "#b58cff"),
+            ("▲ Khu", "#ff9b45"),
+            ("◆ Đá", "#60dfff"),
+            ("● Người", "#ffd700"),
+            ("● Bạn", COLOR_ONLINE)
+        ]
+        ly = max(bottom + 4, h - 11)
+        pad = 16
+        n_items = len(legend_items)
+        step = (w - 2 * pad) / max(1, n_items - 1)
+        for idx, (label, color) in enumerate(legend_items):
+            lx = pad + idx * step
+            c.create_text(lx, ly, text=label, fill=color,
+                          font=(FONT_FAMILY, 7), anchor="center")
 
 
 def main():
